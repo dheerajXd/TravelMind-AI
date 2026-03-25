@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import * as Location from 'expo-location';
+import { getCurrentWeather } from '../services/weatherService';
 
 // Note: Using a simple custom picker or default UI to avoid extra dependencies if possible
 // We will just use simple buttons for selection to avoid configuring @react-native-picker/picker if it's missing.
@@ -10,6 +11,7 @@ const HomeScreen = ({ navigation }) => {
     const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
     const [tripType, setTripType] = useState('business');
     const [hasAlerted, setHasAlerted] = useState(false);
+    const [weather, setWeather] = useState('loading');
 
     useEffect(() => {
         (async () => {
@@ -17,15 +19,23 @@ const HomeScreen = ({ navigation }) => {
             if (status !== 'granted') {
                 setErrorMsg('Permission to access location was denied');
                 // fallback location (Bengaluru)
-                setLocation({ coords: { latitude: 12.9716, longitude: 77.5946 } });
+                const fallback = { coords: { latitude: 12.9716, longitude: 77.5946 } };
+                setLocation(fallback);
+                const w = await getCurrentWeather(fallback.coords.latitude, fallback.coords.longitude);
+                setWeather(w);
                 return;
             }
 
             try {
                 let loc = await Location.getCurrentPositionAsync({});
                 setLocation(loc);
+                const w = await getCurrentWeather(loc.coords.latitude, loc.coords.longitude);
+                setWeather(w);
             } catch (e) {
-                setLocation({ coords: { latitude: 12.9716, longitude: 77.5946 } });
+                const fallback = { coords: { latitude: 12.9716, longitude: 77.5946 } };
+                setLocation(fallback);
+                const w = await getCurrentWeather(fallback.coords.latitude, fallback.coords.longitude);
+                setWeather(w);
             }
         })();
 
@@ -72,6 +82,13 @@ const HomeScreen = ({ navigation }) => {
     return (
         <View style={styles.container}>
             <View style={styles.infoCard}>
+                {weather && weather !== 'loading' ? (
+                    <Text style={styles.weatherText}>🌦️ {weather.city} {'\n'}{weather.temperature}°C — {weather.condition}</Text>
+                ) : weather === null ? (
+                    <Text style={styles.weatherText}>Weather unavailable</Text>
+                ) : (
+                    <Text style={styles.weatherText}>Fetching weather...</Text>
+                )}
                 <Text style={styles.timeTitle}>{currentTime}</Text>
                 <Text style={styles.locationText}>
                     {errorMsg ? "Mock Location: Bengaluru" : (location ? `Lat: ${location.coords.latitude.toFixed(4)}, Lng: ${location.coords.longitude.toFixed(4)}` : 'Fetching location...')}
@@ -104,6 +121,7 @@ const HomeScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
     container: { flex: 1, padding: 20, backgroundColor: '#f9f9f9', justifyContent: 'center' },
     infoCard: { backgroundColor: '#fff', padding: 30, borderRadius: 16, alignItems: 'center', marginBottom: 30, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, elevation: 4 },
+    weatherText: { fontSize: 18, color: '#0d47a1', fontWeight: 'bold', textAlign: 'center', marginBottom: 16, lineHeight: 24 },
     timeTitle: { fontSize: 36, fontWeight: 'bold', color: '#333', marginBottom: 12 },
     locationText: { fontSize: 16, color: '#666' },
     typeContainer: { marginBottom: 30 },
