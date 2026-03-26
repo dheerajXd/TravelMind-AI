@@ -21,26 +21,31 @@ const RecommendationScreen = ({ route }) => {
             const isBusiness = tripType === 'business';
             const extraKeywords = isBusiness ? 'lounge' : 'sightseeing';
 
-            // We make multiple parallel calls to Google Places API
-            const [resResults, cafeResults, workResults, placeResults] = await Promise.all([
+            const [restaurantsResult, cafesResult, workspacesResult, placesResult] = await Promise.allSettled([
                 fetchNearbyPlaces(latitude, longitude, 'restaurant', 2000),
                 fetchNearbyPlaces(latitude, longitude, 'cafe', 2000),
                 isBusiness ? fetchNearbyPlaces(latitude, longitude, 'workspace|coworking|business start', 3000) : Promise.resolve([]),
                 fetchNearbyPlaces(latitude, longitude, extraKeywords, 3000),
             ]);
 
+            const resResults = restaurantsResult.status === 'fulfilled' ? restaurantsResult.value : [];
+            const cafeResults = cafesResult.status === 'fulfilled' ? cafesResult.value : [];
+            const workResults = workspacesResult.status === 'fulfilled' ? workspacesResult.value : [];
+            const placeResults = placesResult.status === 'fulfilled' ? placesResult.value : [];
+
             setRestaurants(resResults.slice(0, 3));
             setCafes(cafeResults.slice(0, 3));
             setWorkspaces(workResults.slice(0, 3));
             setPlaces(placeResults.slice(0, 3));
-        } catch (error) {
-            if (error.message === 'INVALID_KEY') {
-                Alert.alert('Configuration Error', 'Invalid Google Places API Key. Please check your .env file and ensure EXPO_PUBLIC_GOOGLE_PLACES_API_KEY is set.');
-            } else if (error.message === 'REQUEST_DENIED') {
-                Alert.alert('API Error', 'Request denied by Google. Check your billing or API restrictions.');
-            } else {
-                Alert.alert('Error', 'Failed to fetch recommendations. ' + error.message);
+
+            const failedRequests = [restaurantsResult, cafesResult, workspacesResult, placesResult]
+                .filter((result) => result.status === 'rejected');
+
+            if (failedRequests.length > 0 && resResults.length === 0 && cafeResults.length === 0 && workResults.length === 0 && placeResults.length === 0) {
+                Alert.alert('Limited results', 'Nearby places could not be loaded.');
             }
+        } catch (error) {
+            Alert.alert('Error', 'Failed to fetch nearby places.');
         } finally {
             setLoading(false);
         }

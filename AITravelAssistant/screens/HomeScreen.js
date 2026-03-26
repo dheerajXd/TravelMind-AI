@@ -10,7 +10,6 @@ const HomeScreen = ({ navigation }) => {
     const [errorMsg, setErrorMsg] = useState(null);
     const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
     const [tripType, setTripType] = useState('business');
-    const [hasAlerted, setHasAlerted] = useState(false);
     const [weather, setWeather] = useState('loading');
 
     useEffect(() => {
@@ -44,28 +43,6 @@ const HomeScreen = ({ navigation }) => {
         }, 1000);
         return () => clearInterval(interval);
     }, []);
-
-    // Proactive Feature: 5 seconds alert
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            if (!hasAlerted) {
-                Alert.alert(
-                    "Free Time!",
-                    "You have free time. Here are suggestions nearby.",
-                    [
-                        { text: "Cancel", style: "cancel" },
-                        {
-                            text: "Show Suggestions",
-                            onPress: () => handleGetSuggestions()
-                        }
-                    ]
-                );
-                setHasAlerted(true);
-            }
-        }, 5000);
-
-        return () => clearTimeout(timer);
-    }, [hasAlerted, location, tripType]);
 
     const handleGetSuggestions = () => {
         if (location) {
@@ -114,6 +91,7 @@ const HomeScreen = ({ navigation }) => {
             <TouchableOpacity style={styles.button} onPress={handleGetSuggestions}>
                 <Text style={styles.buttonText}>Get Suggestions</Text>
             </TouchableOpacity>
+
         </View>
     );
 };
