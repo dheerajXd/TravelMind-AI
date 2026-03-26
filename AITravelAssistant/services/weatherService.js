@@ -1,23 +1,20 @@
-import axios from 'axios';
+import { requestJson } from './apiClient';
 
 export const getCurrentWeather = async (lat, lon) => {
-    const apiKey = process.env.EXPO_PUBLIC_OPENWEATHER_API_KEY;
-    if (!apiKey || apiKey === 'your_key_here') {
-        return null;
-    }
-
     try {
-        const response = await axios.get(
-            `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`
-        );
-        const data = response.data;
+        const data = await requestJson('/weather', {
+            params: {
+                lat,
+                lng: lon,
+            },
+        });
         return {
-            temperature: Math.round(data.main.temp),
-            condition: data.weather[0].main,
-            city: data.name
+            temperature: Math.round(data.temperature),
+            condition: data.condition,
+            city: data.city
         };
     } catch (error) {
-        console.warn("Weather Error:", error.message);
+        console.warn("Weather Error:", error.message, error.url || '');
         return null; // Return null to trigger fallback UI
     }
 };
