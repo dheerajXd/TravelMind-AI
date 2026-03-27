@@ -3,6 +3,7 @@ import {
     ActivityIndicator,
     Alert,
     Linking,
+    Platform,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -12,8 +13,11 @@ import {
 import TopInfoBar from '../components/TopInfoBar';
 import {
     clearLocalProfileState,
+    clearGoogleSessionId,
+    fetchGmailMessages,
     fetchGoogleProfile,
     getPlannedItems,
+    getGoogleLoginUrlForRedirect,
     fetchUserContext,
     getGoogleSessionId,
     getOrCreateUserId,
@@ -35,6 +39,11 @@ const ProfileScreen = ({ route, navigation }) => {
         countries: '—',
     });
     const [notificationsEnabled, setNotificationsState] = useState(true);
+    const [googleConnection, setGoogleConnection] = useState({
+        connected: false,
+        email: null,
+        messageCount: 0,
+    });
 
     const onboardingParams = route?.params ?? {};
     const { formattedTime, temperatureLabel, coordsLabel, locationLabel } = useLiveContext();
@@ -51,11 +60,12 @@ const ProfileScreen = ({ route, navigation }) => {
             const userId = await getOrCreateUserId();
             const sessionId = await getGoogleSessionId();
 
-            const [context, googleProfile, plannedItems, notificationsState] = await Promise.all([
+            const [context, googleProfile, plannedItems, notificationsState, gmailData] = await Promise.all([
                 fetchUserContext(userId).catch(() => null),
                 sessionId ? fetchGoogleProfile(sessionId).catch(() => null) : Promise.resolve(null),
                 getPlannedItems().catch(() => []),
                 getNotificationsEnabled().catch(() => true),
+                sessionId ? fetchGmailMessages(sessionId, 5).catch(() => null) : Promise.resolve(null),
             ]);
 
             const resolvedName = googleProfile?.name || 'Traveler';
@@ -75,6 +85,11 @@ const ProfileScreen = ({ route, navigation }) => {
                 countries: countryCount,
             });
             setNotificationsState(notificationsState);
+            setGoogleConnection({
+                connected: Boolean(sessionId && googleProfile),
+                email: googleProfile?.email || null,
+                messageCount: gmailData?.messages?.length || 0,
+            });
         } catch (error) {
             console.warn('Profile screen failed:', error);
         } finally {
@@ -120,6 +135,68 @@ const ProfileScreen = ({ route, navigation }) => {
             console.warn('Help link open failed:', error);
             Alert.alert('Help & Support', 'Reach us at support@travelmind.ai');
         }
+    };
+
+    const handleGoogleConnect = async () => {
+        try {
+            await clearGoogleSessionId().catch(() => null);
+            setGoogleConnection({
+                connected: false,
+                email: null,
+                messageCount: 0,
+            });
+            const redirectTarget =
+                Platform.OS === 'web' && typeof window !== 'undefined'
+                    ? `${window.location.origin}${window.location.pathname}`
+                    : null;
+            const authUrl = getGoogleLoginUrlForRedirect(redirectTarget);
+            if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                window.location.assign(authUrl);
+                return;
+            }
+            await Linking.openURL(authUrl);
+        } catch (error) {
+            console.warn('Google connect failed:', error);
+            Alert.alert('Google connection', 'Could not open the Google sign-in flow right now.');
+        }
+    };
+
+    const handleGoogleDisconnect = () => {
+        const runDisconnect = async () => {
+            try {
+                await clearGoogleSessionId();
+                setGoogleConnection({
+                    connected: false,
+                    email: null,
+                    messageCount: 0,
+                });
+                setProfile((current) => ({
+                    ...current,
+                    email: buildProfileSubtext(onboardingParams),
+                }));
+                await loadProfile();
+            } catch (error) {
+                console.warn('Google disconnect failed:', error);
+                Alert.alert('Google connection', 'Could not disconnect the Google account right now.');
+            }
+        };
+
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            const confirmed = window.confirm('Do you want to disconnect your Google account from this app?');
+            if (confirmed) {
+                runDisconnect();
+            }
+            return;
+        }
+
+        Alert.alert('Disconnect Google', 'Do you want to disconnect your Google account from this app?', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Disconnect',
+                style: 'destructive',
+                onPress: runDisconnect,
+            },
+        ]);
     };
 
     const handleLogout = () => {
@@ -193,6 +270,50 @@ const ProfileScreen = ({ route, navigation }) => {
                     <StatBlock value={stats.trips} label="Trips" />
                     <StatBlock value={stats.places} label="Places Visited" />
                     <StatBlock value={stats.countries} label="Countries" />
+                </View>
+            </View>
+
+            <View style={styles.googleCard}>
+                <View style={styles.googleHeaderRow}>
+                    <View style={styles.googleContent}>
+                        <Text style={styles.googleEyebrow}>GOOGLE SYNC</Text>
+                        <Text style={styles.googleTitle}>
+                            {googleConnection.connected ? 'Google account connected' : 'Connect Gmail and Calendar'}
+                        </Text>
+                        <Text style={styles.googleSubtitle}>
+                            {googleConnection.connected
+                                ? `${googleConnection.email || 'Google account linked'} · ${googleConnection.messageCount} recent inbox messages synced`
+                                : 'Connect your Google account so the app can read Calendar and Gmail, build your schedule, and detect leisure time automatically.'}
+                        </Text>
+                    </View>
+                    <View
+                        style={[
+                            styles.googleStatusChip,
+                            googleConnection.connected ? styles.googleStatusChipConnected : styles.googleStatusChipDisconnected,
+                        ]}
+                    >
+                        <Text
+                            style={[
+                                styles.googleStatusText,
+                                googleConnection.connected ? styles.googleStatusTextConnected : styles.googleStatusTextDisconnected,
+                            ]}
+                        >
+                            {googleConnection.connected ? 'Connected' : 'Not linked'}
+                        </Text>
+                    </View>
+                </View>
+
+                <View style={styles.googleActionsRow}>
+                    <Pressable style={styles.googlePrimaryButton} onPress={handleGoogleConnect}>
+                        <Text style={styles.googlePrimaryButtonText}>
+                            {googleConnection.connected ? 'Reconnect Google' : 'Connect Google'}
+                        </Text>
+                    </Pressable>
+                    {googleConnection.connected ? (
+                        <Pressable style={styles.googleSecondaryButton} onPress={handleGoogleDisconnect}>
+                            <Text style={styles.googleSecondaryButtonText}>Disconnect</Text>
+                        </Pressable>
+                    ) : null}
                 </View>
             </View>
 
@@ -326,6 +447,105 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         gap: 12,
+    },
+    googleCard: {
+        marginTop: 18,
+        backgroundColor: '#FFFFFF',
+        borderRadius: 24,
+        padding: 18,
+        borderWidth: 1,
+        borderColor: '#ECE6F8',
+        shadowColor: 'rgba(60, 32, 122, 0.08)',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 1,
+        shadowRadius: 20,
+        elevation: 3,
+    },
+    googleHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: 12,
+        marginBottom: 16,
+    },
+    googleContent: {
+        flex: 1,
+    },
+    googleEyebrow: {
+        fontSize: 12,
+        fontWeight: '800',
+        color: '#7B57F6',
+        letterSpacing: 1,
+        marginBottom: 6,
+    },
+    googleTitle: {
+        fontSize: 19,
+        fontWeight: '800',
+        color: '#171329',
+        marginBottom: 6,
+    },
+    googleSubtitle: {
+        fontSize: 14,
+        lineHeight: 21,
+        color: '#706A83',
+    },
+    googleStatusChip: {
+        borderRadius: 999,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderWidth: 1,
+    },
+    googleStatusChipConnected: {
+        backgroundColor: '#EEF8F3',
+        borderColor: '#D5F0E0',
+    },
+    googleStatusChipDisconnected: {
+        backgroundColor: '#F4EEFF',
+        borderColor: '#E4D7FF',
+    },
+    googleStatusText: {
+        fontSize: 12,
+        fontWeight: '800',
+    },
+    googleStatusTextConnected: {
+        color: '#228B5F',
+    },
+    googleStatusTextDisconnected: {
+        color: '#6B46C1',
+    },
+    googleActionsRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 12,
+    },
+    googlePrimaryButton: {
+        flexGrow: 1,
+        minWidth: 170,
+        backgroundColor: '#6C3BFF',
+        borderRadius: 18,
+        paddingVertical: 14,
+        paddingHorizontal: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    googlePrimaryButtonText: {
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontWeight: '800',
+    },
+    googleSecondaryButton: {
+        minWidth: 116,
+        backgroundColor: '#F4EEFF',
+        borderRadius: 18,
+        paddingVertical: 14,
+        paddingHorizontal: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    googleSecondaryButtonText: {
+        color: '#5D39D8',
+        fontSize: 15,
+        fontWeight: '700',
     },
     statBlock: {
         flex: 1,

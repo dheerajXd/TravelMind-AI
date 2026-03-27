@@ -195,6 +195,13 @@ export const getGoogleLoginUrl = () => {
   return `${getApiBaseUrl()}/auth/google/login`;
 };
 
+export const getGoogleLoginUrlForRedirect = (redirectTo) => {
+  if (!redirectTo) {
+    return getGoogleLoginUrl();
+  }
+  return `${getApiBaseUrl()}/auth/google/login?redirect_to=${encodeURIComponent(redirectTo)}`;
+};
+
 export const fetchCalendarEvents = async (sessionId) => {
   return requestJson('/calendar/events', {
     params: { session_id: sessionId, max_results: 10 },

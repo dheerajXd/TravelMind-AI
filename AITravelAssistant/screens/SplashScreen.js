@@ -4,13 +4,13 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 const SplashScreen = ({ navigation }) => {
   useEffect(() => {
     const timer = setTimeout(() => {
-      navigation.replace('Onboarding');
+      navigation.replace('GoogleSignIn');
     }, 1800);
     return () => clearTimeout(timer);
   }, [navigation]);
 
   return (
-    <Pressable style={styles.screen} onPress={() => navigation.replace('Onboarding')}>
+    <Pressable style={styles.screen} onPress={() => navigation.replace('GoogleSignIn')}>
       <View style={styles.glowOne} />
       <View style={styles.glowTwo} />
 

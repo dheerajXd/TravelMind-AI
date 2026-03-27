@@ -1,7 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Animated,
+    Animated,
+    Alert,
   ImageBackground,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,10 +15,14 @@ import TopInfoBar from '../components/TopInfoBar';
 import {
   fetchNearbyHeroPlace,
   fetchCalendarEvents,
+  fetchGmailMessages,
   getGoogleSessionId,
   getOrCreateUserId,
   getPlannedItems,
+  togglePlannedItem,
 } from '../services/backendService';
+import { fetchOpenClawUserBrief, fetchOpenClawUserPreview } from '../services/openclawService';
+import { fetchNearbyPlaces } from '../services/placesService';
 import { useLiveContext } from '../context/LiveContext';
 
 // ---------- Helpers ----------
@@ -36,6 +42,28 @@ const weatherEmoji = (condition) => WEATHER_EMOJI[condition] || '🌤️';
 const fmtAMPM = (date) =>
   date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
+const normalizeCalendarDate = (rawValue, fallbackTime = '00:00:00') => {
+  if (!rawValue) return null;
+  if (rawValue.includes('T')) {
+    return new Date(rawValue);
+  }
+  return new Date(`${rawValue}T${fallbackTime}`);
+};
+
+const isNoisyAllDayEvent = (title = '') =>
+  /birthday|anniversary|holiday/i.test(title);
+
+const mapActivityToNearbyKeyword = (activityPreference, cuisinePreference) => {
+  const cuisine = (cuisinePreference || '').toLowerCase();
+  if (activityPreference === 'coffee' || cuisine === 'cafe') return 'cafe';
+  if (activityPreference === 'sightseeing') return 'tourist attraction';
+  if (activityPreference === 'work spot') return 'coworking';
+  if (cuisine === 'italian') return 'italian restaurant';
+  if (cuisine === 'chinese') return 'chinese restaurant';
+  if (cuisine === 'street food') return 'street food';
+  return 'restaurant';
+};
+
 // Image cache: location -> URL (prevents repeated fetches)
 const imageCache = {};
 
@@ -53,10 +81,18 @@ const detectFreeTimeSlots = (events) => {
 
   for (const ev of events) {
     const evStart = new Date(ev.startTime);
+    const evEnd = new Date(ev.endTime);
+
+    if (evEnd <= cursor) {
+      continue;
+    }
+
     if (evStart > cursor) {
       const gapMs = evStart - cursor;
       if (gapMs >= 30 * 60 * 1000) {
         slots.push({
+          id: `free-${cursor.toISOString()}-${evStart.toISOString()}`,
+          sortTime: cursor.getTime(),
           time: `${fmtAMPM(cursor)} \u2013 ${fmtAMPM(evStart)}`,
           title: 'Free Time',
           subtitle: 'Explore nearby spots tailored to your preferences.',
@@ -64,7 +100,7 @@ const detectFreeTimeSlots = (events) => {
         });
       }
     }
-    cursor = new Date(ev.endTime) > cursor ? new Date(ev.endTime) : cursor;
+    cursor = evEnd > cursor ? evEnd : cursor;
   }
 
   // free time after last event until end of day
@@ -72,6 +108,8 @@ const detectFreeTimeSlots = (events) => {
     const gapMs = endOfDay - cursor;
     if (gapMs >= 30 * 60 * 1000) {
       slots.push({
+        id: `free-${cursor.toISOString()}-${endOfDay.toISOString()}`,
+        sortTime: cursor.getTime(),
         time: `${fmtAMPM(cursor)} \u2013 ${fmtAMPM(endOfDay)}`,
         title: 'Free Time',
         subtitle: 'You have the rest of the evening free.',
@@ -102,17 +140,38 @@ const buildPlannedSummary = (plannedItems) => {
 const buildTimeline = (rawEvents) => {
   const now = new Date();
 
+  const seen = new Set();
   const parsed = rawEvents
     .map((ev) => {
-      const startRaw = ev.start?.dateTime || ev.start?.date;
-      const endRaw = ev.end?.dateTime || ev.end?.date;
-      if (!startRaw) return null;
+      const title = ev.summary || 'Untitled event';
+      if (isNoisyAllDayEvent(title)) return null;
+
+      const isAllDay = Boolean(ev.start?.date && !ev.start?.dateTime);
+      const start = normalizeCalendarDate(
+        ev.start?.dateTime || ev.start?.date,
+        isAllDay ? '00:00:00' : '00:00:00'
+      );
+      const end = normalizeCalendarDate(
+        ev.end?.dateTime || ev.end?.date || ev.start?.dateTime || ev.start?.date,
+        isAllDay ? '23:59:00' : '00:00:00'
+      );
+      if (!start || !end) return null;
+      const dedupeKey =
+        ev.id ||
+        `${title}|${start.toISOString()}|${end.toISOString()}|${ev.location || ''}`;
+      if (seen.has(dedupeKey)) {
+        return null;
+      }
+      seen.add(dedupeKey);
+
       return {
-        id: ev.id,
-        title: ev.summary || 'Untitled event',
+        id: dedupeKey,
+        title,
         location: ev.location || null,
-        startTime: startRaw,
-        endTime: endRaw || startRaw,
+        startTime: start.toISOString(),
+        endTime: end.toISOString(),
+        sortTime: start.getTime(),
+        isAllDay,
       };
     })
     .filter(Boolean)
@@ -125,19 +184,22 @@ const buildTimeline = (rawEvents) => {
     const end = new Date(ev.endTime);
     const isPast = end < now;
     items.push({
-      time: fmtAMPM(start),
+      id: ev.id,
+      sortTime: ev.sortTime,
+      time: ev.isAllDay ? 'All day' : fmtAMPM(start),
       title: ev.title,
       subtitle: ev.location || `Ends at ${fmtAMPM(end)}`,
       tone: isPast ? 'done' : 'soft',
     });
   }
 
-  const freeSlots = detectFreeTimeSlots(parsed);
+  const futureTimedEvents = parsed.filter((ev) => !ev.isAllDay);
+  const freeSlots = detectFreeTimeSlots(futureTimedEvents);
   items.push(...freeSlots);
 
-  // Sort final list by time string so free slots interleave properly
-  // (a simple approach; works for same-day items)
-  return items;
+  return items
+    .sort((a, b) => (a.sortTime || 0) - (b.sortTime || 0))
+    .map(({ sortTime, ...item }) => item);
 };
 
 const DashboardScreen = ({ navigation, route }) => {
@@ -158,37 +220,51 @@ const DashboardScreen = ({ navigation, route }) => {
 
   const [heroPlace, setHeroPlace] = useState(null);
   const [calendarEvents, setCalendarEvents] = useState(null); // null = not loaded
+  const [gmailMessages, setGmailMessages] = useState([]);
   const [tripImageUrl, setTripImageUrl] = useState(null);
   const [plannedItems, setPlannedItems] = useState([]);
+  const [assistantPreviewLoading, setAssistantPreviewLoading] = useState(false);
+  const [assistantBrief, setAssistantBrief] = useState(null);
+  const [assistantMeta, setAssistantMeta] = useState(null);
+  const [assistantCandidates, setAssistantCandidates] = useState([]);
+  const [assistantCandidateIndex, setAssistantCandidateIndex] = useState(0);
   const imageOpacity = useRef(new Animated.Value(0)).current;
+  const assistantAutoloadedRef = useRef(false);
 
-  // Hero place + calendar on mount
-  useEffect(() => {
-    let active = true;
+  const bootstrapDashboard = useCallback(async () => {
+    if (latitude == null || longitude == null) return;
 
-    const bootstrap = async () => {
-      if (latitude == null || longitude == null) return;
+    const place = await fetchNearbyHeroPlace(latitude, longitude).catch(() => null);
+    if (place) {
+      setHeroPlace(place);
+    }
 
-      const place = await fetchNearbyHeroPlace(latitude, longitude).catch(() => null);
-
-      if (!active) return;
-      if (place) setHeroPlace(place);
-
-      // Try to load calendar events if we have a Google session
-      try {
-        const sessionId = await getGoogleSessionId();
-        if (sessionId) {
-          const calData = await fetchCalendarEvents(sessionId);
-          if (active && calData?.events) setCalendarEvents(calData.events);
-        }
-      } catch (_) {
-        // Calendar not available — schedule will use context-aware fallback
+    try {
+      const sessionId = await getGoogleSessionId();
+      if (!sessionId) {
+        setCalendarEvents(null);
+        setGmailMessages([]);
+        return;
       }
-    };
 
-    bootstrap();
-    return () => { active = false; };
+      const [calData, gmailData] = await Promise.all([
+        fetchCalendarEvents(sessionId).catch(() => null),
+        fetchGmailMessages(sessionId, 5).catch(() => null),
+      ]);
+      setCalendarEvents(calData?.events || null);
+      setGmailMessages(gmailData?.messages || []);
+    } catch (_) {
+      setCalendarEvents(null);
+      setGmailMessages([]);
+    }
   }, [latitude, longitude]);
+
+  // Hero place + Google data on mount / focus
+  useEffect(() => {
+    bootstrapDashboard();
+    const unsubscribe = navigation.addListener('focus', bootstrapDashboard);
+    return unsubscribe;
+  }, [bootstrapDashboard, navigation]);
 
   useEffect(() => {
     const loadPlannedItems = async () => {
@@ -274,6 +350,43 @@ const DashboardScreen = ({ navigation, route }) => {
     tripPurpose ||
     (activityPreference === 'work spot' ? 'business' : 'leisure');
 
+  const loadAssistantCandidates = useCallback(async () => {
+    if (latitude == null || longitude == null) {
+      return [];
+    }
+
+    try {
+      const keyword = mapActivityToNearbyKeyword(activityPreference, cuisinePreference);
+      const places = await fetchNearbyPlaces(latitude, longitude, keyword, 4000);
+      const normalized = (places || []).slice(0, 5).map((place) => ({
+        id: `candidate-${place.id}`,
+        name: place.name,
+        subtitle: 'Assistant nearby fit',
+        description: place.vicinity || `Suggested near ${shortLocation}`,
+        rating: typeof place.rating === 'number' ? `⭐ ${place.rating.toFixed(1)}` : null,
+        distanceLabel: shortLocation,
+        imageUrl: place.photoUrl || null,
+        metaText: place.vicinity || null,
+        mapQuery: `${place.name} ${place.vicinity || ''}`.trim(),
+      }));
+      setAssistantCandidates(normalized);
+      setAssistantCandidateIndex((currentIndex) => {
+        if (normalized.length === 0) return 0;
+        return Math.min(currentIndex, normalized.length - 1);
+      });
+      return normalized;
+    } catch (error) {
+      console.warn('Assistant candidate load failed:', error);
+      setAssistantCandidates([]);
+      setAssistantCandidateIndex(0);
+      return [];
+    }
+  }, [activityPreference, cuisinePreference, latitude, longitude, shortLocation]);
+
+  useEffect(() => {
+    loadAssistantCandidates();
+  }, [loadAssistantCandidates]);
+
   const statusChips = [
     `${capitalize(vibe)} vibe`,
     `${capitalize(budget)} budget`,
@@ -329,6 +442,232 @@ const DashboardScreen = ({ navigation, route }) => {
   }, [calendarEvents, formattedTime, shortLocation, activityPreference, plannedSummary]);
 
   const freeTimeBannerSubtitle = plannedSummary || 'Explore suggestions';
+  const hasFreeTimeSlot = useMemo(
+    () => scheduleItems.some((item) => item.title === 'Free Time'),
+    [scheduleItems]
+  );
+  const plannedHeroItem = useMemo(() => {
+    if (assistantCandidates.length > 0) {
+      return assistantCandidates[assistantCandidateIndex] || assistantCandidates[0];
+    }
+    if (heroPlace) {
+      return {
+        id: `hero-${heroPlace.name}-${heroPlace.address || shortLocation}`,
+        name: heroPlace.name,
+        subtitle: 'Saved from dashboard assistant',
+        description: heroPlace.address || `Suggested near ${shortLocation}`,
+        rating: null,
+        distanceLabel: shortLocation,
+        imageUrl: heroImage,
+        metaText: 'Dashboard suggestion',
+        mapQuery: heroPlace.address || heroPlace.name,
+      };
+    }
+    if (!shortLocation) return null;
+    return {
+      id: `fallback-${shortLocation}-${coordsLabel || 'current-location'}`,
+      name: shortLocation,
+      subtitle: 'Saved from dashboard assistant',
+      description: `Current area around ${shortLocation}`,
+      rating: null,
+      distanceLabel: shortLocation,
+      imageUrl: heroImage || null,
+      metaText: coordsLabel || 'Current location',
+      mapQuery: coordsLabel ? `${shortLocation} ${coordsLabel}` : shortLocation,
+    };
+  }, [assistantCandidateIndex, assistantCandidates, coordsLabel, heroImage, heroPlace, shortLocation]);
+  const isHeroPlanned = useMemo(
+    () => Boolean(plannedHeroItem && plannedItems.some((item) => item.id === plannedHeroItem.id)),
+    [plannedHeroItem, plannedItems]
+  );
+  const displayedAssistantBrief = useMemo(() => {
+    return (
+      assistantBrief ||
+      'Tap “Ask AI assistant” to generate a context-aware travel brief from your current plan, weather, and schedule.'
+    );
+  }, [assistantBrief]);
+
+  const buildLocalAssistantBrief = (selectedPlace = plannedHeroItem, options = {}) => {
+    const { refreshedAt = null, announceRefresh = false } = options;
+    const placeName = selectedPlace?.name || shortLocation;
+    const placeContext =
+      selectedPlace?.description ||
+      selectedPlace?.metaText ||
+      `Suggested near ${shortLocation}`;
+    const weatherContext = weather?.condition ? `${temperatureLabel} and ${weather.condition}` : temperatureLabel;
+    const freeTimeContext = hasFreeTimeSlot
+      ? 'You currently have a free-time window to use well.'
+      : 'This looks like a good moment to prepare your next move.';
+    const refreshContext =
+      announceRefresh && refreshedAt
+        ? ` Refreshed at ${refreshedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} using your latest nearby context.`
+        : '';
+    const inboxContext = gmailMessages?.[0]?.subject
+      ? ` Recent inbox update: ${gmailMessages[0].subject}.`
+      : '';
+    const isAreaFallback =
+      selectedPlace?.id?.startsWith('fallback-') || placeName === shortLocation;
+
+    if (isAreaFallback) {
+      return `${freeTimeContext} I’m still narrowing down the best nearby match around ${shortLocation} for ${activityPreference}. Current conditions are ${weatherContext}, so this is a good moment to explore options close by.${inboxContext}${refreshContext}`;
+    }
+
+    return `${freeTimeContext} ${placeName} looks like a strong nearby fit for ${activityPreference}. Current conditions are ${weatherContext}. ${placeContext}.${inboxContext}${refreshContext}`;
+  };
+
+  const handleAssistantPreview = async ({ silent = false, selectedPlace = plannedHeroItem, announceRefresh = false } = {}) => {
+    try {
+      setAssistantPreviewLoading(true);
+      const userId = await getOrCreateUserId();
+      const sessionId = await getGoogleSessionId();
+      let preview;
+
+      try {
+        preview = await fetchOpenClawUserBrief({
+          userId,
+          googleSessionId: sessionId,
+        });
+      } catch (briefError) {
+        console.warn('OpenClaw brief call failed, falling back to preview:', briefError);
+        preview = await fetchOpenClawUserPreview({
+          userId,
+          googleSessionId: sessionId,
+        });
+      }
+
+      const previewText = preview.assistant_response || preview.note || 'Assistant preview is ready.';
+      const refreshedAt = new Date();
+      const briefText =
+        preview.executed || !isGenericAssistantNote(previewText)
+          ? previewText
+          : buildLocalAssistantBrief(selectedPlace, { refreshedAt, announceRefresh });
+      setAssistantBrief(briefText);
+      setAssistantMeta({
+        executed: Boolean(preview.executed),
+        updatedAt: refreshedAt,
+      });
+      if (!silent) {
+        Alert.alert(
+          preview.executed ? 'AI Assistant Brief' : 'AI Brief Preview',
+          briefText
+        );
+      }
+      console.log('OpenClaw dashboard response:', preview);
+    } catch (error) {
+      console.warn('OpenClaw preview failed:', error);
+      setAssistantBrief('Could not prepare the assistant brief right now. Try again in a moment.');
+      setAssistantMeta({
+        executed: false,
+        updatedAt: new Date(),
+      });
+      if (!silent) {
+        Alert.alert('AI Brief Preview', 'Could not prepare the assistant brief right now.');
+      }
+    } finally {
+      setAssistantPreviewLoading(false);
+    }
+  };
+
+  const handleAssistantRefresh = async () => {
+    try {
+      setAssistantPreviewLoading(true);
+      const refreshedCandidates = await loadAssistantCandidates();
+      const nextCandidates = refreshedCandidates.length > 0 ? refreshedCandidates : assistantCandidates;
+      let nextIndex = assistantCandidateIndex;
+
+      if (nextCandidates.length > 1) {
+        nextIndex = (assistantCandidateIndex + 1) % nextCandidates.length;
+        setAssistantCandidateIndex(nextIndex);
+      }
+
+      const nextPlace = nextCandidates[nextIndex] || plannedHeroItem;
+      await handleAssistantPreview({
+        silent: true,
+        selectedPlace: nextPlace,
+        announceRefresh: true,
+      });
+    } catch (error) {
+      console.warn('Assistant refresh failed:', error);
+      setAssistantBrief('Could not refresh the assistant brief right now. Please try again.');
+      setAssistantMeta({
+        executed: false,
+        updatedAt: new Date(),
+      });
+    } finally {
+      setAssistantPreviewLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!hasFreeTimeSlot) {
+      return;
+    }
+    if (assistantAutoloadedRef.current || assistantPreviewLoading || assistantBrief) {
+      return;
+    }
+
+    assistantAutoloadedRef.current = true;
+    handleAssistantPreview({ silent: true });
+  }, [hasFreeTimeSlot, assistantPreviewLoading, assistantBrief]);
+
+  const handleAssistantAddToPlan = async () => {
+    if (!plannedHeroItem) {
+      Alert.alert('No place available', 'There is no nearby place ready to add yet.');
+      return;
+    }
+
+    try {
+      const result = await togglePlannedItem(plannedHeroItem);
+      setPlannedItems(result.items);
+      Alert.alert(
+        result.saved ? 'Added to plan' : 'Removed from plan',
+        result.saved
+          ? `${plannedHeroItem.name} is now attached to your free-time plan.`
+          : `${plannedHeroItem.name} was removed from your plan.`
+      );
+    } catch (error) {
+      console.warn('Assistant add to plan failed:', error);
+      Alert.alert('Plan update failed', 'Could not update your plan right now.');
+    }
+  };
+
+  const handleAssistantOpenMap = async () => {
+    const query =
+      plannedHeroItem?.mapQuery ||
+      plannedHeroItem?.name ||
+      heroPlace?.address ||
+      heroPlace?.name ||
+      locationLabel;
+    if (!query) {
+      Alert.alert('Map unavailable', 'There is no location available to open right now.');
+      return;
+    }
+
+    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+    try {
+      await Linking.openURL(url);
+    } catch (error) {
+      console.warn('Assistant map open failed:', error);
+      Alert.alert('Map unavailable', 'Could not open the map right now.');
+    }
+  };
+
+  const handleAssistantOpenSuggestions = async () => {
+    const userId = await getOrCreateUserId();
+    navigation.navigate('Recommendations', {
+      userId,
+      inferredTripType,
+      activityPreference,
+      cuisinePreference,
+    });
+  };
+
+  const handleAssistantNextPlace = () => {
+    if (assistantCandidates.length <= 1) {
+      return;
+    }
+    setAssistantCandidateIndex((current) => (current + 1) % assistantCandidates.length);
+  };
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
@@ -358,8 +697,8 @@ const DashboardScreen = ({ navigation, route }) => {
       >
         <Animated.View style={[StyleSheet.absoluteFill, { opacity: imageOpacity }]} />
         <LinearGradient
-          colors={['transparent', 'rgba(30, 15, 60, 0.75)', 'rgba(20, 10, 45, 0.92)']}
-          locations={[0, 0.55, 1]}
+          colors={['rgba(109, 93, 246, 0.28)', 'rgba(109, 93, 246, 0.88)', 'rgba(124, 58, 237, 0.96)']}
+          locations={[0, 0.45, 1]}
           style={StyleSheet.absoluteFill}
         />
         <View style={styles.heroContent}>
@@ -399,9 +738,23 @@ const DashboardScreen = ({ navigation, route }) => {
 
       {/* Schedule */}
       <View style={styles.scheduleCard}>
-        <Text style={styles.sectionTitle}>Today&apos;s Schedule</Text>
+        <View style={styles.scheduleHeaderRow}>
+          <Text style={styles.sectionTitle}>Today&apos;s Schedule</Text>
+          <View style={styles.scheduleSyncRow}>
+            {calendarEvents?.length ? (
+              <View style={styles.scheduleSyncIconChip}>
+                <Text style={styles.scheduleSyncIcon}>🗓️</Text>
+              </View>
+            ) : null}
+            {gmailMessages?.length ? (
+              <View style={styles.scheduleSyncIconChip}>
+                <Text style={styles.scheduleSyncIcon}>✉️</Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
         {scheduleItems.map((item, index) => (
-          <View key={`${item.time}-${item.title}`} style={styles.timelineRow}>
+          <View key={item.id || `${item.time}-${item.title}-${index}`} style={styles.timelineRow}>
             <View style={styles.timelineRail}>
               <View
                 style={[
@@ -451,6 +804,126 @@ const DashboardScreen = ({ navigation, route }) => {
         <Text style={styles.freeTimeArrow}>›</Text>
       </Pressable>
 
+      <Pressable style={styles.assistantPreviewButton} onPress={() => handleAssistantPreview()}>
+        <Text style={styles.assistantPreviewText}>
+          {assistantPreviewLoading ? 'Preparing AI brief…' : 'Ask AI assistant'}
+        </Text>
+      </Pressable>
+
+      <View style={styles.assistantCard}>
+        <View style={styles.assistantHeaderRow}>
+          <View style={styles.assistantTitleBlock}>
+            <Text style={styles.assistantEyebrow}>AI ASSISTANT</Text>
+            <Text style={styles.assistantTitle}>Travel brief</Text>
+          </View>
+          <View
+            style={[
+              styles.assistantStatusChip,
+              assistantMeta?.executed
+                ? styles.assistantStatusChipActive
+                : styles.assistantStatusChipPreview,
+            ]}
+          >
+            <Text
+              style={[
+                styles.assistantStatusText,
+                assistantMeta?.executed
+                  ? styles.assistantStatusTextActive
+                  : styles.assistantStatusTextPreview,
+              ]}
+            >
+              {assistantMeta?.executed ? 'Live' : 'Preview'}
+            </Text>
+          </View>
+        </View>
+
+        {plannedHeroItem ? (
+          <View style={styles.assistantTargetCard}>
+            <View style={styles.assistantTargetTextBlock}>
+              <Text style={styles.assistantTargetLabel}>Suggested place</Text>
+              <Text style={styles.assistantTargetName}>{plannedHeroItem.name}</Text>
+              <Text style={styles.assistantTargetMeta}>
+                {plannedHeroItem.description || heroPlace?.address || `Near ${shortLocation}`}
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.assistantTargetBadge,
+                isHeroPlanned ? styles.assistantTargetBadgeSaved : styles.assistantTargetBadgeReady,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.assistantTargetBadgeText,
+                  isHeroPlanned ? styles.assistantTargetBadgeTextSaved : styles.assistantTargetBadgeTextReady,
+                ]}
+              >
+                {isHeroPlanned ? 'In plan' : 'Ready'}
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        <Text style={styles.assistantBody}>
+          {displayedAssistantBrief}
+        </Text>
+
+        <View style={styles.assistantFooterRow}>
+          <Text style={styles.assistantFooterText}>
+            {assistantMeta?.updatedAt
+              ? `Updated ${assistantMeta.updatedAt.toLocaleTimeString([], {
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}`
+              : 'No brief generated yet'}
+          </Text>
+          <Pressable style={styles.assistantInlineButton} onPress={handleAssistantRefresh}>
+            <Text style={styles.assistantInlineButtonText}>
+              {assistantPreviewLoading ? 'Refreshing…' : 'Refresh'}
+            </Text>
+          </Pressable>
+        </View>
+
+        {assistantCandidates.length > 1 ? (
+          <Pressable style={styles.assistantSwapButton} onPress={handleAssistantNextPlace}>
+            <Text style={styles.assistantSwapButtonText}>
+              Try another nearby fit ({assistantCandidateIndex + 1}/{assistantCandidates.length})
+            </Text>
+          </Pressable>
+        ) : null}
+
+        <View style={styles.assistantActionsRow}>
+          <Pressable
+            disabled={!plannedHeroItem}
+            style={[
+              styles.assistantPrimaryAction,
+              !plannedHeroItem && styles.assistantActionDisabled,
+            ]}
+            onPress={handleAssistantAddToPlan}
+          >
+            <Text style={styles.assistantPrimaryActionText}>
+              {isHeroPlanned ? 'Added to Plan' : 'Add to Plan'}
+            </Text>
+          </Pressable>
+          <Pressable
+            style={styles.assistantSecondaryAction}
+            onPress={handleAssistantOpenSuggestions}
+          >
+            <Text style={styles.assistantSecondaryActionText}>Suggestions</Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.assistantSecondaryAction,
+              !plannedHeroItem && styles.assistantActionDisabled,
+            ]}
+            disabled={!plannedHeroItem}
+            onPress={handleAssistantOpenMap}
+          >
+            <Text style={styles.assistantSecondaryActionText}>Map</Text>
+          </Pressable>
+        </View>
+      </View>
+
       <View style={{ height: 30 }} />
     </ScrollView>
   );
@@ -459,6 +932,15 @@ const DashboardScreen = ({ navigation, route }) => {
 const capitalize = (value) => {
   if (!value) return '';
   return value.charAt(0).toUpperCase() + value.slice(1);
+};
+
+const isGenericAssistantNote = (text) => {
+  if (!text) return true;
+  const normalized = String(text).trim().toLowerCase();
+  return (
+    normalized.startsWith('travel context prepared for') ||
+    normalized === 'assistant preview is ready.'
+  );
 };
 
 const styles = StyleSheet.create({
@@ -662,11 +1144,35 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
   },
+  scheduleHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 18,
+  },
+  scheduleSyncRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  scheduleSyncIconChip: {
+    minWidth: 38,
+    height: 38,
+    paddingHorizontal: 10,
+    borderRadius: 19,
+    backgroundColor: '#F4EEFF',
+    borderWidth: 1,
+    borderColor: '#E5D9FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scheduleSyncIcon: {
+    fontSize: 18,
+  },
   sectionTitle: {
     fontSize: 20,
     fontWeight: '800',
     color: '#1D1733',
-    marginBottom: 18,
   },
   timelineRow: {
     flexDirection: 'row',
@@ -768,6 +1274,216 @@ const styles = StyleSheet.create({
     fontSize: 36,
     lineHeight: 36,
     marginTop: -2,
+  },
+  assistantPreviewButton: {
+    marginTop: 12,
+    alignSelf: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  assistantPreviewText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#6C46FF',
+  },
+  assistantCard: {
+    marginTop: 8,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#ECE5FA',
+    shadowColor: '#9A83E5',
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+  },
+  assistantHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 12,
+  },
+  assistantTitleBlock: {
+    flex: 1,
+  },
+  assistantEyebrow: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#7B57F6',
+    letterSpacing: 1.1,
+    marginBottom: 4,
+  },
+  assistantTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1D1733',
+  },
+  assistantStatusChip: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+  },
+  assistantStatusChipActive: {
+    backgroundColor: '#EEF8F3',
+    borderColor: '#D5F0E0',
+  },
+  assistantStatusChipPreview: {
+    backgroundColor: '#F4EEFF',
+    borderColor: '#E4D7FF',
+  },
+  assistantStatusText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  assistantStatusTextActive: {
+    color: '#228B5F',
+  },
+  assistantStatusTextPreview: {
+    color: '#6B46C1',
+  },
+  assistantBody: {
+    fontSize: 15,
+    lineHeight: 24,
+    color: '#5A5372',
+    marginBottom: 14,
+  },
+  assistantTargetCard: {
+    borderRadius: 18,
+    padding: 14,
+    backgroundColor: '#F8F5FF',
+    borderWidth: 1,
+    borderColor: '#ECE5FA',
+    marginBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  assistantTargetTextBlock: {
+    flex: 1,
+  },
+  assistantTargetLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#7B57F6',
+    letterSpacing: 0.8,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+  },
+  assistantTargetName: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#1D1733',
+    marginBottom: 6,
+  },
+  assistantTargetMeta: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: '#7E7894',
+  },
+  assistantTargetBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+  },
+  assistantTargetBadgeReady: {
+    backgroundColor: '#F4EEFF',
+    borderColor: '#E4D7FF',
+  },
+  assistantTargetBadgeSaved: {
+    backgroundColor: '#EEF8F3',
+    borderColor: '#D5F0E0',
+  },
+  assistantTargetBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  assistantTargetBadgeTextReady: {
+    color: '#6B46C1',
+  },
+  assistantTargetBadgeTextSaved: {
+    color: '#228B5F',
+  },
+  assistantFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  assistantFooterText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#8A82A5',
+    fontWeight: '600',
+  },
+  assistantInlineButton: {
+    backgroundColor: '#F4EEFF',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  assistantInlineButtonText: {
+    color: '#5C31F4',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  assistantSwapButton: {
+    marginTop: 12,
+    marginBottom: 2,
+    alignSelf: 'flex-start',
+    backgroundColor: '#F8F5FF',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#ECE5FA',
+  },
+  assistantSwapButtonText: {
+    color: '#6B46C1',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  assistantActionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 14,
+  },
+  assistantPrimaryAction: {
+    flexGrow: 1,
+    minWidth: 140,
+    backgroundColor: '#6C46FF',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  assistantPrimaryActionText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  assistantSecondaryAction: {
+    backgroundColor: '#F4EEFF',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 96,
+  },
+  assistantSecondaryActionText: {
+    color: '#5C31F4',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  assistantActionDisabled: {
+    opacity: 0.55,
   },
 });
 

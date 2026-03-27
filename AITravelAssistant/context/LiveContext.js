@@ -14,6 +14,7 @@ export const LiveContextProvider = ({ children }) => {
     const [coords, setCoords] = useState(FALLBACK_COORDS);
     const [loading, setLoading] = useState(true);
     const lastWeatherRef = useRef(null);
+    const lastMeaningfulLocationRef = useRef(null);
 
     useEffect(() => {
         const timer = setInterval(() => {
@@ -59,12 +60,20 @@ export const LiveContextProvider = ({ children }) => {
                     setWeather(lastWeatherRef.current);
                 }
 
-                setLocationLabel(
-                    labelData ||
-                    weatherData?.city ||
-                    lastWeatherRef.current?.city ||
-                    'Nearby area'
+                const resolvedLabel = firstMeaningfulLabel(
+                    labelData,
+                    weatherData?.city,
+                    lastWeatherRef.current?.city
                 );
+
+                if (resolvedLabel) {
+                    lastMeaningfulLocationRef.current = resolvedLabel;
+                    setLocationLabel(resolvedLabel);
+                } else if (lastMeaningfulLocationRef.current) {
+                    setLocationLabel(lastMeaningfulLocationRef.current);
+                } else {
+                    setLocationLabel('Nearby area');
+                }
             } finally {
                 if (active) {
                     setLoading(false);
@@ -114,4 +123,16 @@ export const useLiveContext = () => {
         throw new Error('useLiveContext must be used inside LiveContextProvider');
     }
     return context;
+};
+
+const firstMeaningfulLabel = (...values) => {
+    for (const value of values) {
+        const normalized = String(value || '').trim();
+        if (!normalized) continue;
+        if (normalized.toLowerCase() === 'nearby area') continue;
+        if (normalized.toLowerCase() === 'locating…') continue;
+        if (normalized.toLowerCase() === 'locating...') continue;
+        return normalized;
+    }
+    return null;
 };

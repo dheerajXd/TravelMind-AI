@@ -4,6 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 
 import SplashScreen from '../screens/SplashScreen';
+import GoogleSignInScreen from '../screens/GoogleSignInScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import ExploreScreen from '../screens/ExploreScreen';
@@ -76,6 +77,11 @@ const AppNavigator = () => {
             <Stack.Screen
                 name="Splash"
                 component={SplashScreen}
+                options={{ headerShown: false }}
+            />
+            <Stack.Screen
+                name="GoogleSignIn"
+                component={GoogleSignInScreen}
                 options={{ headerShown: false }}
             />
             <Stack.Screen
