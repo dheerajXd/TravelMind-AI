@@ -18,3 +18,18 @@ export const getCurrentWeather = async (lat, lon) => {
         return null; // Return null to trigger fallback UI
     }
 };
+
+export const getLocationLabel = async (lat, lon) => {
+    try {
+        const data = await requestJson('/places/reverse-geocode', {
+            params: {
+                lat,
+                lng: lon,
+            },
+        });
+        return data?.label || null;
+    } catch (error) {
+        console.warn("Location Label Error:", error.message, error.url || '');
+        return null;
+    }
+};

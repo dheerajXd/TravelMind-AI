@@ -80,6 +80,18 @@ class PlacesSearchQuery(TravelAssistantBaseModel):
         return self
 
 
+class ReverseGeocodeQuery(TravelAssistantBaseModel):
+    lat: float = Field(..., ge=-90, le=90)
+    lng: float = Field(..., ge=-180, le=180)
+
+
+class ReverseGeocodeResponse(TravelAssistantBaseModel):
+    label: str
+    city: str | None = None
+    region: str | None = None
+    country: str | None = None
+
+
 class PlaceItem(TravelAssistantBaseModel):
     name: str
     rating: float | None = None

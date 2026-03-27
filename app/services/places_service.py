@@ -6,7 +6,7 @@ import httpx
 from fastapi import HTTPException, status
 
 from app.core.config import get_settings
-from app.models.schemas import PlaceItem, PlacesSearchQuery
+from app.models.schemas import PlaceItem, PlacesSearchQuery, ReverseGeocodeQuery, ReverseGeocodeResponse
 from app.utils.helpers import (
     TTLCache,
     build_location_string,
@@ -68,6 +68,47 @@ class PlacesService:
         places_cache.set(cache_key, results)
         return results
 
+    async def reverse_geocode(self, query: ReverseGeocodeQuery) -> ReverseGeocodeResponse:
+        if not self.api_key:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Google Places API key is not configured.",
+            )
+
+        cache_key = make_cache_key("reverse_geocode", lat=query.lat, lng=query.lng)
+        cached = places_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    "https://maps.googleapis.com/maps/api/geocode/json",
+                    params={
+                        "latlng": f"{query.lat},{query.lng}",
+                        "key": self.api_key,
+                    },
+                )
+                response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise_upstream_error("Google Geocoding", "request timed out.", status.HTTP_504_GATEWAY_TIMEOUT)
+            raise exc
+        except httpx.HTTPStatusError as exc:
+            raise_upstream_error("Google Geocoding", f"HTTP {exc.response.status_code}")
+            raise exc
+        except httpx.HTTPError as exc:
+            raise_upstream_error("Google Geocoding", "network error while fetching location label.")
+            raise exc
+
+        payload = response.json()
+        api_status = payload.get("status")
+        if api_status not in {"OK", "ZERO_RESULTS"}:
+            raise_upstream_error("Google Geocoding", payload.get("error_message") or api_status or "unknown error")
+
+        result = self._serialize_reverse_geocode(payload.get("results", []))
+        places_cache.set(cache_key, result)
+        return result
+
     def _build_request(self, query: PlacesSearchQuery) -> tuple[str, dict[str, Any]]:
         coordinates = build_location_string(query.lat, query.lng)
         if coordinates:
@@ -103,6 +144,42 @@ class PlacesService:
             photo_url=f"/places/photo?photo_reference={photo_reference}" if photo_reference else None,
             lat=((place.get("geometry") or {}).get("location") or {}).get("lat"),
             lng=((place.get("geometry") or {}).get("location") or {}).get("lng"),
+        )
+
+    def _serialize_reverse_geocode(self, results: list[dict[str, Any]]) -> ReverseGeocodeResponse:
+        components: dict[str, str] = {}
+
+        for result in results:
+            for component in result.get("address_components", []):
+                long_name = component.get("long_name")
+                for component_type in component.get("types", []):
+                    if long_name and component_type not in components:
+                        components[component_type] = long_name
+
+        city = (
+            components.get("locality")
+            or components.get("sublocality_level_1")
+            or components.get("administrative_area_level_3")
+            or components.get("administrative_area_level_2")
+        )
+        region = (
+            components.get("administrative_area_level_2")
+            or components.get("administrative_area_level_1")
+        )
+        country = components.get("country")
+
+        label_parts = []
+        if city:
+            label_parts.append(city)
+        if region and region != city:
+            label_parts.append(region)
+
+        label = ", ".join(label_parts) if label_parts else (country or "Nearby area")
+        return ReverseGeocodeResponse(
+            label=label,
+            city=city,
+            region=region,
+            country=country,
         )
 
     async def get_photo_bytes(self, photo_reference: str, max_width: int = 400) -> tuple[bytes, str]:

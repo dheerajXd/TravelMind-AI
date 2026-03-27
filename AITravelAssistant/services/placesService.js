@@ -40,6 +40,11 @@ export const fetchNearbyPlaces = async (latitude, longitude, keyword, radius = 5
       rating: place.rating || 'N/A',
       vicinity: place.vicinity,
       location: place.geometry.location,
+      types: place.types || [],
+      openNow: place.opening_hours?.open_now ?? null,
+      photoUrl: place.photos?.[0]?.photo_reference
+        ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photoreference=${place.photos[0].photo_reference}&key=${API_KEY}`
+        : null,
     }));
   } catch (error) {
     if (error.message === 'INVALID_KEY' || error.message === 'REQUEST_DENIED') {
