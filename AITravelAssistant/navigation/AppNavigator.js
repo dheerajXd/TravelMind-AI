@@ -10,6 +10,7 @@ import ExploreScreen from '../screens/ExploreScreen';
 import TripsScreen from '../screens/TripsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import RecommendationScreen from '../screens/RecommendationScreen';
+import SavedPlacesScreen from '../screens/SavedPlacesScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -91,6 +92,11 @@ const AppNavigator = () => {
                 name="Recommendations"
                 component={RecommendationScreen}
                 options={{ title: 'Suggestions' }}
+            />
+            <Stack.Screen
+                name="SavedPlaces"
+                component={SavedPlacesScreen}
+                options={{ headerShown: false }}
             />
         </Stack.Navigator>
     );

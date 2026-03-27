@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
+    Linking,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -9,22 +11,18 @@ import {
 } from 'react-native';
 import TopInfoBar from '../components/TopInfoBar';
 import {
+    clearLocalProfileState,
     fetchGoogleProfile,
     getPlannedItems,
     fetchUserContext,
     getGoogleSessionId,
     getOrCreateUserId,
+    getNotificationsEnabled,
+    setNotificationsEnabled,
 } from '../services/backendService';
 import { useLiveContext } from '../context/LiveContext';
 
-const SETTINGS_ITEMS = [
-    { icon: '⚙️', label: 'Settings' },
-    { icon: '🔔', label: 'Notifications' },
-    { icon: '♡', label: 'Saved Places' },
-    { icon: '❓', label: 'Help & Support' },
-];
-
-const ProfileScreen = ({ route }) => {
+const ProfileScreen = ({ route, navigation }) => {
     const [loading, setLoading] = useState(true);
     const [profile, setProfile] = useState({
         name: 'Traveler',
@@ -36,13 +34,16 @@ const ProfileScreen = ({ route }) => {
         places: '—',
         countries: '—',
     });
+    const [notificationsEnabled, setNotificationsState] = useState(true);
 
     const onboardingParams = route?.params ?? {};
     const { formattedTime, temperatureLabel, coordsLabel, locationLabel } = useLiveContext();
 
     useEffect(() => {
         loadProfile();
-    }, []);
+        const unsubscribe = navigation.addListener('focus', loadProfile);
+        return unsubscribe;
+    }, [navigation]);
 
     const loadProfile = async () => {
         setLoading(true);
@@ -50,10 +51,11 @@ const ProfileScreen = ({ route }) => {
             const userId = await getOrCreateUserId();
             const sessionId = await getGoogleSessionId();
 
-            const [context, googleProfile, plannedItems] = await Promise.all([
+            const [context, googleProfile, plannedItems, notificationsState] = await Promise.all([
                 fetchUserContext(userId).catch(() => null),
                 sessionId ? fetchGoogleProfile(sessionId).catch(() => null) : Promise.resolve(null),
                 getPlannedItems().catch(() => []),
+                getNotificationsEnabled().catch(() => true),
             ]);
 
             const resolvedName = googleProfile?.name || 'Traveler';
@@ -72,6 +74,7 @@ const ProfileScreen = ({ route }) => {
                 places: String(plannedItems.length || 0),
                 countries: countryCount,
             });
+            setNotificationsState(notificationsState);
         } catch (error) {
             console.warn('Profile screen failed:', error);
         } finally {
@@ -79,7 +82,78 @@ const ProfileScreen = ({ route }) => {
         }
     };
 
+    const handleUpdatePreferences = () => {
+        navigation.navigate('Onboarding', {
+            mode: 'edit',
+            currentPreferences: {
+                budget: onboardingParams.budget,
+                vibe: onboardingParams.vibe,
+                cuisinePreference: onboardingParams.cuisinePreference,
+                activityPreference: onboardingParams.activityPreference,
+            },
+        });
+    };
+
+    const handleNotificationsPress = async () => {
+        const nextValue = !notificationsEnabled;
+        try {
+            await setNotificationsEnabled(nextValue);
+            setNotificationsState(nextValue);
+            Alert.alert(
+                'Notifications updated',
+                nextValue ? 'Proactive trip alerts are now enabled.' : 'Trip alerts are now paused.'
+            );
+        } catch (error) {
+            console.warn('Notifications update failed:', error);
+        }
+    };
+
+    const handleSavedPlacesPress = () => {
+        navigation.navigate('SavedPlaces');
+    };
+
+    const handleHelpPress = async () => {
+        const helpUrl = 'mailto:support@travelmind.ai?subject=TravelMind%20Support';
+        try {
+            await Linking.openURL(helpUrl);
+        } catch (error) {
+            console.warn('Help link open failed:', error);
+            Alert.alert('Help & Support', 'Reach us at support@travelmind.ai');
+        }
+    };
+
+    const handleLogout = () => {
+        Alert.alert('Log out', 'Do you want to sign out of this local profile session?', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Log Out',
+                style: 'destructive',
+                onPress: async () => {
+                    try {
+                        await clearLocalProfileState();
+                        navigation.reset({
+                            index: 0,
+                            routes: [{ name: 'Splash' }],
+                        });
+                    } catch (error) {
+                        console.warn('Logout failed:', error);
+                    }
+                },
+            },
+        ]);
+    };
+
     const profileTitle = useMemo(() => profile.name, [profile.name]);
+    const settingsItems = useMemo(() => ([
+        { icon: '✨', label: 'Update Preferences', onPress: handleUpdatePreferences },
+        {
+            icon: notificationsEnabled ? '🔔' : '🔕',
+            label: `Notifications ${notificationsEnabled ? 'On' : 'Off'}`,
+            onPress: handleNotificationsPress,
+        },
+        { icon: '♡', label: 'Saved Places', onPress: handleSavedPlacesPress },
+        { icon: '❓', label: 'Help & Support', onPress: handleHelpPress },
+    ]), [notificationsEnabled]);
 
     if (loading) {
         return (
@@ -110,7 +184,7 @@ const ProfileScreen = ({ route }) => {
                         <Text style={styles.profileName}>{profileTitle}</Text>
                         <Text style={styles.profileEmail}>{profile.email}</Text>
                     </View>
-                    <Pressable style={styles.profileAction}>
+                    <Pressable style={styles.profileAction} onPress={handleUpdatePreferences}>
                         <Text style={styles.profileActionIcon}>⚙️</Text>
                     </Pressable>
                 </View>
@@ -122,17 +196,17 @@ const ProfileScreen = ({ route }) => {
                 </View>
             </View>
 
-            {SETTINGS_ITEMS.map((item) => (
-                <View key={item.label} style={styles.settingsCard}>
+            {settingsItems.map((item) => (
+                <Pressable key={item.label} style={styles.settingsCard} onPress={item.onPress}>
                     <Text style={styles.settingsIcon}>{item.icon}</Text>
                     <Text style={styles.settingsLabel}>{item.label}</Text>
                     <Text style={styles.settingsArrow}>›</Text>
-                </View>
+                </Pressable>
             ))}
 
-            <View style={styles.logoutCard}>
+            <Pressable style={styles.logoutCard} onPress={handleLogout}>
                 <Text style={styles.logoutText}>⇢ Log Out</Text>
-            </View>
+            </Pressable>
 
             <View style={styles.footerSpace} />
         </ScrollView>

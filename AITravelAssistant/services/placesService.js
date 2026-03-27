@@ -8,7 +8,7 @@ const BASE_URL = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
  * Fetch nearby places based on location and keyword.
  * @param {number} latitude 
  * @param {number} longitude 
- * @param {string} keyword e.g. "restaurant", "cafe", "workspace"
+ * @param {string | null} keyword e.g. "restaurant", "cafe", "workspace"
  */
 export const fetchNearbyPlaces = async (latitude, longitude, keyword, radius = 5000) => {
   if (!API_KEY || API_KEY === 'your_key_here') {
@@ -16,13 +16,25 @@ export const fetchNearbyPlaces = async (latitude, longitude, keyword, radius = 5
   }
 
   try {
-    const response = await axios.get(BASE_URL, {
-      params: {
-        location: `${latitude},${longitude}`,
-        radius: radius,
-        keyword: keyword,
-        key: API_KEY,
-      },
+    const params = {
+      location: `${latitude},${longitude}`,
+      radius: radius,
+      key: API_KEY,
+    };
+
+    if (keyword) {
+      params.keyword = keyword;
+    }
+
+    const response = await axios.get(BASE_URL, { params });
+
+    console.log('Explore API response:', {
+      keyword: keyword || 'popular_nearby',
+      radius,
+      status: response.data.status,
+      resultCount: response.data.results?.length || 0,
+      lat: latitude,
+      lng: longitude,
     });
 
     if (response.data.status === 'REQUEST_DENIED') {

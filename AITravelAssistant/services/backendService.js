@@ -4,6 +4,7 @@ import { getApiBaseUrl, requestJson } from './apiClient';
 
 const USER_ID_KEY = 'ai_travel_user_id';
 const SAVED_PLAN_KEY = 'ai_travel_saved_plan_items';
+const NOTIFICATIONS_ENABLED_KEY = 'ai_travel_notifications_enabled';
 
 const buildUserId = () => `mobile-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
@@ -182,6 +183,14 @@ export const saveGoogleSessionId = async (sessionId) => {
   await setStoredValue(GOOGLE_SESSION_KEY, sessionId);
 };
 
+export const clearGoogleSessionId = async () => {
+  if (Platform.OS === 'web') {
+    window.localStorage.removeItem(GOOGLE_SESSION_KEY);
+    return;
+  }
+  await SecureStore.deleteItemAsync(GOOGLE_SESSION_KEY);
+};
+
 export const getGoogleLoginUrl = () => {
   return `${getApiBaseUrl()}/auth/google/login`;
 };
@@ -236,4 +245,31 @@ export const togglePlannedItem = async (item) => {
     saved: true,
     items: nextItems,
   };
+};
+
+export const clearPlannedItems = async () => {
+  if (Platform.OS === 'web') {
+    window.localStorage.removeItem(SAVED_PLAN_KEY);
+    return;
+  }
+  await SecureStore.deleteItemAsync(SAVED_PLAN_KEY);
+};
+
+export const getNotificationsEnabled = async () => {
+  const stored = await getStoredValue(NOTIFICATIONS_ENABLED_KEY);
+  if (stored == null) return true;
+  return stored === 'true';
+};
+
+export const setNotificationsEnabled = async (enabled) => {
+  await setStoredValue(NOTIFICATIONS_ENABLED_KEY, String(Boolean(enabled)));
+};
+
+export const clearLocalProfileState = async () => {
+  await clearGoogleSessionId();
+  if (Platform.OS === 'web') {
+    window.localStorage.removeItem(USER_ID_KEY);
+    return;
+  }
+  await SecureStore.deleteItemAsync(USER_ID_KEY);
 };

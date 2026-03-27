@@ -15,6 +15,7 @@ import {
   fetchCalendarEvents,
   getGoogleSessionId,
   getOrCreateUserId,
+  getPlannedItems,
 } from '../services/backendService';
 import { useLiveContext } from '../context/LiveContext';
 
@@ -82,6 +83,18 @@ const detectFreeTimeSlots = (events) => {
   return slots;
 };
 
+const buildPlannedSummary = (plannedItems) => {
+  if (!plannedItems?.length) {
+    return null;
+  }
+
+  if (plannedItems.length === 1) {
+    return `Planned stop: ${plannedItems[0].name}`;
+  }
+
+  return `Planned stop: ${plannedItems[0].name} +${plannedItems.length - 1} more`;
+};
+
 /**
  * Convert raw backend calendar events into a unified timeline
  * sorted chronologically with free-time gaps.
@@ -146,6 +159,7 @@ const DashboardScreen = ({ navigation, route }) => {
   const [heroPlace, setHeroPlace] = useState(null);
   const [calendarEvents, setCalendarEvents] = useState(null); // null = not loaded
   const [tripImageUrl, setTripImageUrl] = useState(null);
+  const [plannedItems, setPlannedItems] = useState([]);
   const imageOpacity = useRef(new Animated.Value(0)).current;
 
   // Hero place + calendar on mount
@@ -175,6 +189,21 @@ const DashboardScreen = ({ navigation, route }) => {
     bootstrap();
     return () => { active = false; };
   }, [latitude, longitude]);
+
+  useEffect(() => {
+    const loadPlannedItems = async () => {
+      try {
+        const items = await getPlannedItems();
+        setPlannedItems(items);
+      } catch (error) {
+        console.warn('Dashboard planned items load failed:', error);
+      }
+    };
+
+    loadPlannedItems();
+    const unsubscribe = navigation.addListener('focus', loadPlannedItems);
+    return unsubscribe;
+  }, [navigation]);
 
   const greeting = useMemo(() => {
     const hour = currentTime.getHours();
@@ -251,10 +280,23 @@ const DashboardScreen = ({ navigation, route }) => {
     cuisinePreference,
   ];
 
+  const plannedSummary = useMemo(() => buildPlannedSummary(plannedItems), [plannedItems]);
+
   // Dynamic schedule: try real calendar events, fall back to context-aware items
   const scheduleItems = useMemo(() => {
     if (calendarEvents && calendarEvents.length > 0) {
-      return buildTimeline(calendarEvents);
+      const timeline = buildTimeline(calendarEvents);
+      if (!plannedSummary) {
+        return timeline;
+      }
+      return timeline.map((item) =>
+        item.tone === 'highlight'
+          ? {
+              ...item,
+              subtitle: `${item.subtitle} ${plannedSummary}`,
+            }
+          : item
+      );
     }
     // Context-aware fallback schedule
     const now = new Date();
@@ -280,11 +322,13 @@ const DashboardScreen = ({ navigation, route }) => {
       {
         time: `${fmtAMPM(eveningStart)} \u2013 ${fmtAMPM(eveningEnd)}`,
         title: 'Free Time',
-        subtitle: 'Explore nearby spots tailored to your preferences.',
+        subtitle: plannedSummary || 'Explore nearby spots tailored to your preferences.',
         tone: 'highlight',
       },
     ];
-  }, [calendarEvents, formattedTime, shortLocation, activityPreference]);
+  }, [calendarEvents, formattedTime, shortLocation, activityPreference, plannedSummary]);
+
+  const freeTimeBannerSubtitle = plannedSummary || 'Explore suggestions';
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
@@ -402,7 +446,7 @@ const DashboardScreen = ({ navigation, route }) => {
         </View>
         <View style={styles.freeTimeTextWrap}>
           <Text style={styles.freeTimeTitle}>You have free time this evening</Text>
-          <Text style={styles.freeTimeSubtitle}>Explore suggestions</Text>
+          <Text style={styles.freeTimeSubtitle}>{freeTimeBannerSubtitle}</Text>
         </View>
         <Text style={styles.freeTimeArrow}>›</Text>
       </Pressable>

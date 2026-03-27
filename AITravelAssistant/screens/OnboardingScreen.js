@@ -12,11 +12,13 @@ const ATMOSPHERE_OPTIONS = ['calm', 'social', 'productive'];
 const FOOD_OPTIONS = ['South Indian', 'Cafe', 'Italian', 'Chinese', 'Street Food'];
 const FREE_TIME_OPTIONS = ['food', 'coffee', 'work spot', 'sightseeing'];
 
-const OnboardingScreen = ({ navigation }) => {
-    const [budget, setBudget] = useState('medium');
-    const [vibe, setVibe] = useState('calm');
-    const [cuisinePreference, setCuisinePreference] = useState('South Indian');
-    const [activityPreference, setActivityPreference] = useState('food');
+const OnboardingScreen = ({ navigation, route }) => {
+    const existingPreferences = route?.params?.currentPreferences || {};
+    const isEditing = route?.params?.mode === 'edit';
+    const [budget, setBudget] = useState(existingPreferences.budget || 'medium');
+    const [vibe, setVibe] = useState(existingPreferences.vibe || 'calm');
+    const [cuisinePreference, setCuisinePreference] = useState(existingPreferences.cuisinePreference || 'South Indian');
+    const [activityPreference, setActivityPreference] = useState(existingPreferences.activityPreference || 'food');
 
     const continueParams = useMemo(() => ({
         budget,
@@ -39,8 +41,9 @@ const OnboardingScreen = ({ navigation }) => {
             <View style={styles.headerBlock}>
                 <Text style={styles.heading}>Plan your experience</Text>
                 <Text style={styles.subheading}>
-                    Set a few standing preferences so the assistant can personalize nearby suggestions without
-                    asking the same questions every time.
+                    {isEditing
+                        ? 'Update your standing preferences so future suggestions feel more like you.'
+                        : 'Set a few standing preferences so the assistant can personalize nearby suggestions without asking the same questions every time.'}
                 </Text>
             </View>
 
@@ -78,7 +81,7 @@ const OnboardingScreen = ({ navigation }) => {
             </View>
 
             <Pressable style={styles.continueBtn} onPress={handleContinue}>
-                <Text style={styles.continueBtnText}>Continue</Text>
+                <Text style={styles.continueBtnText}>{isEditing ? 'Save Preferences' : 'Continue'}</Text>
             </Pressable>
 
             <Text style={styles.hint}>
