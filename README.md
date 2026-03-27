@@ -123,6 +123,102 @@ curl -X POST http://127.0.0.1:8000/recommendations \
 curl "http://127.0.0.1:8000/smart-suggestions?user_id=demo-user&type=restaurant&radius=2500"
 ```
 
+## Additive Recommendation Engine Module
+
+The project now includes a separate plug-and-play engine at [app/services/recommendation_engine.py](/Users/dheerajd/Documents/New%20project/app/services/recommendation_engine.py). It does not replace the existing app flow. It is an additive module you can call from the current system whenever you want deterministic filtering and scoring on top of already-fetched place data.
+
+Available functions:
+
+- `filter_places(places, context, max_distance)`
+- `calculate_score(place, user, context)`
+- `update_preferences(user, place, action)`
+- `recommend(user, places, context, max_distance=5000.0)`
+
+Sample input:
+
+```python
+places = [
+    {"name": "Cafe Nova", "category": "cafe", "distance": 350, "rating": 4.6, "open": True},
+    {"name": "City Museum", "category": "museum", "distance": 1400, "rating": 4.4, "open": True},
+    {"name": "Night Bites", "category": "restaurant", "distance": 500, "rating": 4.2, "open": True},
+]
+
+context = {
+    "time_of_day": "evening",
+    "weather": "Clear",
+    "temperature": 26.0,
+}
+
+user = {
+    "preferences": {
+        "preferred_categories": ["cafe", "restaurant"],
+        "categories": {"cafe": 3.0, "restaurant": 1.0},
+    },
+    "history": [
+        {"category": "cafe", "action": "like"},
+        {"category": "restaurant", "action": "click"},
+    ],
+}
+```
+
+Sample output:
+
+```python
+[
+    {"name": "Cafe Nova", "category": "cafe", "score": 3.3443},
+    {"name": "Night Bites", "category": "restaurant", "score": 1.2461},
+]
+```
+
+Example usage:
+
+```python
+from app.services.recommendation_engine import recommend, update_preferences
+
+ranked = recommend(user=user, places=places, context=context, max_distance=1500)
+
+updated_user = update_preferences(user=user, place=places[0], action="like")
+```
+
+Optional additive API routes:
+
+```bash
+curl -X POST http://127.0.0.1:8000/recommendation-engine/recommend \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user": {
+      "preferences": {
+        "preferred_categories": ["cafe", "restaurant"],
+        "categories": {"cafe": 3, "restaurant": 1}
+      },
+      "history": [{"category": "cafe", "action": "like"}]
+    },
+    "places": [
+      {"name": "Cafe Nova", "category": "cafe", "distance": 350, "rating": 4.6, "open": true},
+      {"name": "Night Bites", "category": "restaurant", "distance": 500, "rating": 4.2, "open": true}
+    ],
+    "context": {
+      "time_of_day": "evening",
+      "weather": "Clear",
+      "temperature": 26
+    },
+    "max_distance": 1500
+  }'
+```
+
+```bash
+curl -X POST http://127.0.0.1:8000/recommendation-engine/update-preferences \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user": {
+      "preferences": {"categories": {"cafe": 3}},
+      "history": []
+    },
+    "place": {"name": "Cafe Nova", "category": "cafe"},
+    "action": "like"
+  }'
+```
+
 ### Start Google OAuth
 
 ```bash
