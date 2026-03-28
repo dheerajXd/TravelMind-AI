@@ -14,17 +14,34 @@ const buildUrl = (path, params) => {
 };
 
 export const requestJson = async (path, options = {}) => {
-  const { method = 'GET', params, body, headers = {} } = options;
+  const { method = 'GET', params, body, headers = {}, timeoutMs = 12000 } = options;
   const requestUrl = buildUrl(path, params);
-  const response = await fetch(requestUrl, {
-    method,
-    headers: {
-      Accept: 'application/json',
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...headers,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+
+  try {
+    response = await fetch(requestUrl, {
+      method,
+      headers: {
+        Accept: 'application/json',
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...headers,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error?.name === 'AbortError') {
+      const timeoutError = new Error(`Request timed out after ${timeoutMs}ms`);
+      timeoutError.status = 408;
+      timeoutError.url = requestUrl;
+      throw timeoutError;
+    }
+    throw error;
+  }
+  clearTimeout(timeoutId);
 
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;

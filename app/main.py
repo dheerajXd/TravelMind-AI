@@ -12,10 +12,13 @@ from app.api.routes.auth import router as auth_router
 from app.api.routes.calendar import router as calendar_router
 from app.api.routes.context import router as context_router
 from app.api.routes.gmail import router as gmail_router
+from app.api.routes.notifications import router as notifications_router
+from app.api.routes.openclaw import router as openclaw_router
 from app.api.routes.places import router as places_router
 from app.api.routes.recommendation_engine import router as recommendation_engine_router
 from app.api.routes.recommendations import router as recommendations_router
 from app.api.routes.smart import router as smart_router
+from app.api.routes.triggers import router as triggers_router
 from app.api.routes.weather import router as weather_router
 from app.core.config import get_settings
 from app.core.database import init_db
@@ -107,8 +110,11 @@ app.include_router(context_router, prefix="/context", tags=["context"])
 app.include_router(auth_router, tags=["google-auth"])
 app.include_router(gmail_router, tags=["gmail"])
 app.include_router(calendar_router, tags=["calendar"])
+app.include_router(notifications_router, tags=["notifications"])
+app.include_router(triggers_router, tags=["trigger"])
 app.include_router(places_router, prefix="/places", tags=["places"])
 app.include_router(weather_router, tags=["weather"])
 app.include_router(recommendations_router, tags=["recommendations"])
 app.include_router(recommendation_engine_router, tags=["recommendation-engine"])
+app.include_router(openclaw_router, tags=["openclaw"])
 app.include_router(smart_router, tags=["smart"])

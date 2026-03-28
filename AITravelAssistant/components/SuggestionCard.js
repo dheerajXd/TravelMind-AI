@@ -20,8 +20,10 @@ const SuggestionCard = ({
     distanceLabel,
     primaryActionLabel,
     secondaryActionLabel,
+    tertiaryActionLabel,
     onPrimaryAction,
     onSecondaryAction,
+    onTertiaryAction,
     compact = false,
     trailingIcon = '📍',
 }) => {
@@ -97,7 +99,7 @@ const SuggestionCard = ({
                 {!description && address ? <Text style={styles.address}>{address}</Text> : null}
                 {description && address ? <Text style={styles.address}>{address}</Text> : null}
 
-                {primaryActionLabel || secondaryActionLabel ? (
+                {primaryActionLabel || secondaryActionLabel || tertiaryActionLabel ? (
                     <View style={styles.actionsRow}>
                         {primaryActionLabel ? (
                             <Pressable style={styles.primaryAction} onPress={onPrimaryAction}>
@@ -107,6 +109,11 @@ const SuggestionCard = ({
                         {secondaryActionLabel ? (
                             <Pressable style={styles.secondaryAction} onPress={onSecondaryAction}>
                                 <Text style={styles.secondaryActionText}>{secondaryActionLabel}</Text>
+                            </Pressable>
+                        ) : null}
+                        {tertiaryActionLabel ? (
+                            <Pressable style={styles.tertiaryAction} onPress={onTertiaryAction}>
+                                <Text style={styles.tertiaryActionText}>{tertiaryActionLabel}</Text>
                             </Pressable>
                         ) : null}
                     </View>
@@ -251,6 +258,7 @@ const styles = StyleSheet.create({
     },
     actionsRow: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
         gap: 12,
         marginTop: 16,
     },
@@ -278,6 +286,21 @@ const styles = StyleSheet.create({
     secondaryActionText: {
         color: '#44506A',
         fontSize: 16,
+        fontWeight: '700',
+    },
+    tertiaryAction: {
+        minWidth: 104,
+        minHeight: 48,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#FFF7FD',
+        borderWidth: 1,
+        borderColor: '#EADDF7',
+    },
+    tertiaryActionText: {
+        color: '#6B3FFF',
+        fontSize: 15,
         fontWeight: '700',
     },
     compactCard: {

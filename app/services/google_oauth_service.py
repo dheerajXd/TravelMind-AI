@@ -46,7 +46,7 @@ class GoogleOAuthService:
                 "scope": " ".join(self.SCOPES),
                 "access_type": "offline",
                 "include_granted_scopes": "true",
-                "prompt": "consent",
+                "prompt": "select_account consent",
                 "state": state,
             }
         )
@@ -152,7 +152,19 @@ class GoogleOAuthService:
         except httpx.HTTPError as exc:
             raise_upstream_error("Google OAuth", "network error while fetching user profile.")
             raise exc
-        return GoogleUserProfile.model_validate(response.json())
+        payload = response.json()
+        allowed_fields = {
+            "sub",
+            "email",
+            "email_verified",
+            "name",
+            "given_name",
+            "family_name",
+            "picture",
+            "locale",
+        }
+        normalized_payload = {key: value for key, value in payload.items() if key in allowed_fields}
+        return GoogleUserProfile.model_validate(normalized_payload)
 
     async def _refresh_access_token(self, refresh_token: str) -> dict[str, Any]:
         try:

@@ -1,11 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import {
+    Alert,
     Pressable,
     ScrollView,
     StyleSheet,
     Text,
     View,
 } from 'react-native';
+import { getOrCreateUserId, storeTravelContext } from '../services/backendService';
 
 const BUDGET_OPTIONS = ['low', 'medium', 'high'];
 const ATMOSPHERE_OPTIONS = ['calm', 'social', 'productive'];
@@ -19,6 +21,7 @@ const OnboardingScreen = ({ navigation, route }) => {
     const [vibe, setVibe] = useState(existingPreferences.vibe || 'calm');
     const [cuisinePreference, setCuisinePreference] = useState(existingPreferences.cuisinePreference || 'South Indian');
     const [activityPreference, setActivityPreference] = useState(existingPreferences.activityPreference || 'food');
+    const [saving, setSaving] = useState(false);
 
     const continueParams = useMemo(() => ({
         budget,
@@ -28,8 +31,39 @@ const OnboardingScreen = ({ navigation, route }) => {
         preferences: [activityPreference, cuisinePreference, vibe],
     }), [activityPreference, budget, cuisinePreference, vibe]);
 
-    const handleContinue = () => {
-        navigation.replace('MainTabs', continueParams);
+    const handleContinue = async () => {
+        if (saving) {
+            return;
+        }
+
+        setSaving(true);
+        try {
+            const userId = await getOrCreateUserId();
+            const coordinates = await getCoordinates();
+
+            await storeTravelContext({
+                userId,
+                latitude: coordinates.lat,
+                longitude: coordinates.lng,
+                inferredTripType: 'leisure',
+                vibe,
+                budget,
+                cuisinePreference,
+                activityPreference,
+                priority: 'balanced',
+            });
+
+            navigation.replace('MainTabs', continueParams);
+        } catch (error) {
+            console.warn('Context save failed during onboarding:', error);
+            Alert.alert(
+                'Preferences saved locally',
+                'We could not sync your travel context right now, but you can still continue.'
+            );
+            navigation.replace('MainTabs', continueParams);
+        } finally {
+            setSaving(false);
+        }
     };
 
     return (
@@ -81,7 +115,9 @@ const OnboardingScreen = ({ navigation, route }) => {
             </View>
 
             <Pressable style={styles.continueBtn} onPress={handleContinue}>
-                <Text style={styles.continueBtnText}>{isEditing ? 'Save Preferences' : 'Continue'}</Text>
+                <Text style={styles.continueBtnText}>
+                    {saving ? 'Saving…' : isEditing ? 'Save Preferences' : 'Continue'}
+                </Text>
             </Pressable>
 
             <Text style={styles.hint}>
@@ -89,6 +125,32 @@ const OnboardingScreen = ({ navigation, route }) => {
             </Text>
         </ScrollView>
     );
+};
+
+const getCoordinates = async () => {
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
+        try {
+            const position = await new Promise((resolve, reject) => {
+                navigator.geolocation.getCurrentPosition(resolve, reject, {
+                    enableHighAccuracy: true,
+                    timeout: 8000,
+                    maximumAge: 120000,
+                });
+            });
+
+            return {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude,
+            };
+        } catch (error) {
+            console.warn('Onboarding geolocation failed, using fallback coordinates:', error);
+        }
+    }
+
+    return {
+        lat: 13.555,
+        lng: 80.0265,
+    };
 };
 
 const PreferenceSection = ({ title, options, value, onSelect, compact = false, last = false }) => {

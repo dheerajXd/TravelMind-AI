@@ -93,6 +93,7 @@ class ReverseGeocodeResponse(TravelAssistantBaseModel):
 
 
 class PlaceItem(TravelAssistantBaseModel):
+    id: str | None = None
     name: str
     rating: float | None = None
     address: str
@@ -180,6 +181,17 @@ class SmartSuggestionsQuery(TravelAssistantBaseModel):
     google_session_id: str | None = Field(default=None, min_length=10)
 
 
+class SmartFeedbackRequest(TravelAssistantBaseModel):
+    user_id: str = Field(..., min_length=1, max_length=128)
+    action: str = Field(..., min_length=1, max_length=32)
+    place: dict[str, Any] = Field(default_factory=dict)
+
+
+class SmartFeedbackResponse(TravelAssistantBaseModel):
+    message: str
+    learning_state_updated: bool = True
+
+
 class ErrorResponse(TravelAssistantBaseModel):
     detail: str
 
@@ -240,3 +252,114 @@ class CalendarEventItem(TravelAssistantBaseModel):
 
 class CalendarEventsResponse(TravelAssistantBaseModel):
     events: list[CalendarEventItem]
+
+
+class OpenClawStatusResponse(TravelAssistantBaseModel):
+    enabled: bool
+    configured: bool
+    base_url: str | None = None
+    workspace_id: str | None = None
+    note: str
+
+
+class OpenClawContextPreviewRequest(TravelAssistantBaseModel):
+    user_id: str = Field(..., min_length=1, max_length=128)
+    location_label: str | None = None
+    preferences: dict[str, Any] = Field(default_factory=dict)
+    onboarding_profile: dict[str, Any] = Field(default_factory=dict)
+    weather: dict[str, Any] = Field(default_factory=dict)
+    schedule: list[dict[str, Any]] = Field(default_factory=list)
+    free_time_summary: str | None = None
+
+
+class UserNotificationSettingsResponse(TravelAssistantBaseModel):
+    user_id: str
+    notifications_enabled: bool = True
+    radius_km: float = 2
+    quiet_hours_start: str | None = None
+    quiet_hours_end: str | None = None
+    max_per_day: int = 3
+    updated_at: str | None = None
+
+
+class UserNotificationSettingsUpdate(TravelAssistantBaseModel):
+    notifications_enabled: bool = True
+    radius_km: float = Field(default=2, ge=0.1, le=100)
+    quiet_hours_start: str | None = None
+    quiet_hours_end: str | None = None
+    max_per_day: int = Field(default=3, ge=1, le=50)
+
+
+class DeviceTokenRequest(TravelAssistantBaseModel):
+    user_id: str = Field(..., min_length=1, max_length=128)
+    token: str = Field(..., alias="device_token", min_length=8, max_length=2048)
+
+
+class NotificationItemResponse(TravelAssistantBaseModel):
+    id: int
+    place_id: str | None = None
+    type: str | None = None
+    title: str | None = None
+    message: str | None = None
+    sent_at: str
+    clicked: bool = False
+
+
+class NotificationListResponse(TravelAssistantBaseModel):
+    notifications: list[NotificationItemResponse] = Field(default_factory=list)
+
+
+class LocationUpdateRequest(TravelAssistantBaseModel):
+    user_id: str = Field(..., min_length=1, max_length=128)
+    lat: float = Field(..., ge=-90, le=90)
+    lng: float = Field(..., ge=-180, le=180)
+
+
+class TriggerManualRequest(TravelAssistantBaseModel):
+    user_id: str = Field(..., min_length=1, max_length=128)
+
+
+class TriggerResponse(TravelAssistantBaseModel):
+    user_id: str
+    activity_state: str
+    triggered: bool
+    queued: int = 0
+    reason: str
+    sources: dict[str, Any] = Field(default_factory=dict)
+
+
+class OpenClawContextPreviewResponse(TravelAssistantBaseModel):
+    enabled: bool
+    configured: bool
+    payload: dict[str, Any]
+    note: str
+
+
+class OpenClawUserPreviewRequest(TravelAssistantBaseModel):
+    user_id: str = Field(..., min_length=1, max_length=128)
+    google_session_id: str | None = Field(default=None, min_length=10)
+    gmail_max_results: int = Field(default=5, ge=1, le=20)
+    calendar_max_results: int = Field(default=10, ge=1, le=20)
+
+
+class OpenClawUserPreviewResponse(TravelAssistantBaseModel):
+    enabled: bool
+    configured: bool
+    payload: dict[str, Any]
+    note: str
+
+
+class OpenClawUserBriefRequest(TravelAssistantBaseModel):
+    user_id: str = Field(..., min_length=1, max_length=128)
+    google_session_id: str | None = Field(default=None, min_length=10)
+    gmail_max_results: int = Field(default=5, ge=1, le=20)
+    calendar_max_results: int = Field(default=10, ge=1, le=20)
+
+
+class OpenClawUserBriefResponse(TravelAssistantBaseModel):
+    enabled: bool
+    configured: bool
+    executed: bool
+    payload: dict[str, Any]
+    note: str
+    assistant_response: str | None = None

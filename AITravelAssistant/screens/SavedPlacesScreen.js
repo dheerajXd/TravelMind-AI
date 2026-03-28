@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React from 'react';
 import {
     ActivityIndicator,
     Linking,
@@ -9,33 +9,14 @@ import {
     View,
 } from 'react-native';
 import SuggestionCard from '../components/SuggestionCard';
-import { getPlannedItems, togglePlannedItem } from '../services/backendService';
+import { usePlan } from '../context/PlanContext';
 
 const SavedPlacesScreen = ({ navigation }) => {
-    const [loading, setLoading] = useState(true);
-    const [items, setItems] = useState([]);
-
-    const loadItems = useCallback(async () => {
-        try {
-            const plannedItems = await getPlannedItems();
-            setItems(plannedItems);
-        } catch (error) {
-            console.warn('Saved places load failed:', error);
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        loadItems();
-        const unsubscribe = navigation.addListener('focus', loadItems);
-        return unsubscribe;
-    }, [loadItems, navigation]);
+    const { plan: items, loading, removeFromPlan } = usePlan();
 
     const handleRemove = async (item) => {
         try {
-            const result = await togglePlannedItem(item);
-            setItems(result.items);
+            await removeFromPlan(item, { toast: true });
         } catch (error) {
             console.warn('Saved place removal failed:', error);
         }

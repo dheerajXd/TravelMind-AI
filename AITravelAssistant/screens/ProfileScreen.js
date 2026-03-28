@@ -14,17 +14,21 @@ import TopInfoBar from '../components/TopInfoBar';
 import {
     clearLocalProfileState,
     clearGoogleSessionId,
+    fetchNotificationSettings,
     fetchGmailMessages,
     fetchGoogleProfile,
-    getPlannedItems,
     getGoogleLoginUrlForRedirect,
+    getWebOAuthReturnUrl,
     fetchUserContext,
     getGoogleSessionId,
     getOrCreateUserId,
     getNotificationsEnabled,
     setNotificationsEnabled,
+    triggerLocationUpdate,
+    triggerManualNotifications,
 } from '../services/backendService';
 import { useLiveContext } from '../context/LiveContext';
+import { usePlan } from '../context/PlanContext';
 
 const ProfileScreen = ({ route, navigation }) => {
     const [loading, setLoading] = useState(true);
@@ -46,13 +50,14 @@ const ProfileScreen = ({ route, navigation }) => {
     });
 
     const onboardingParams = route?.params ?? {};
-    const { formattedTime, temperatureLabel, coordsLabel, locationLabel } = useLiveContext();
+    const { formattedTime, temperatureLabel, coordsLabel, locationLabel, latitude, longitude } = useLiveContext();
+    const { plan, clearPlan } = usePlan();
 
     useEffect(() => {
         loadProfile();
         const unsubscribe = navigation.addListener('focus', loadProfile);
         return unsubscribe;
-    }, [navigation]);
+    }, [navigation, plan]);
 
     const loadProfile = async () => {
         setLoading(true);
@@ -60,11 +65,10 @@ const ProfileScreen = ({ route, navigation }) => {
             const userId = await getOrCreateUserId();
             const sessionId = await getGoogleSessionId();
 
-            const [context, googleProfile, plannedItems, notificationsState, gmailData] = await Promise.all([
+            const [context, googleProfile, notificationSettings, gmailData] = await Promise.all([
                 fetchUserContext(userId).catch(() => null),
                 sessionId ? fetchGoogleProfile(sessionId).catch(() => null) : Promise.resolve(null),
-                getPlannedItems().catch(() => []),
-                getNotificationsEnabled().catch(() => true),
+                fetchNotificationSettings(userId).catch(() => null),
                 sessionId ? fetchGmailMessages(sessionId, 5).catch(() => null) : Promise.resolve(null),
             ]);
 
@@ -81,10 +85,14 @@ const ProfileScreen = ({ route, navigation }) => {
 
             setStats({
                 trips: context?.trip_details ? '1' : '—',
-                places: String(plannedItems.length || 0),
+                places: String(plan.length || 0),
                 countries: countryCount,
             });
-            setNotificationsState(notificationsState);
+            setNotificationsState(
+                typeof notificationSettings?.notifications_enabled === 'boolean'
+                    ? notificationSettings.notifications_enabled
+                    : await getNotificationsEnabled().catch(() => true)
+            );
             setGoogleConnection({
                 connected: Boolean(sessionId && googleProfile),
                 email: googleProfile?.email || null,
@@ -112,8 +120,24 @@ const ProfileScreen = ({ route, navigation }) => {
     const handleNotificationsPress = async () => {
         const nextValue = !notificationsEnabled;
         try {
-            await setNotificationsEnabled(nextValue);
+            const userId = await getOrCreateUserId();
+            await setNotificationsEnabled(nextValue, {
+                userId,
+                radiusKm: 2,
+                maxPerDay: 3,
+            });
             setNotificationsState(nextValue);
+            if (nextValue) {
+                try {
+                    if (typeof latitude === 'number' && typeof longitude === 'number') {
+                        await triggerLocationUpdate({ userId, lat: latitude, lng: longitude });
+                    } else {
+                        await triggerManualNotifications(userId);
+                    }
+                } catch (triggerError) {
+                    console.warn('Notification trigger failed:', triggerError);
+                }
+            }
             Alert.alert(
                 'Notifications updated',
                 nextValue ? 'Proactive trip alerts are now enabled.' : 'Trip alerts are now paused.'
@@ -147,7 +171,7 @@ const ProfileScreen = ({ route, navigation }) => {
             });
             const redirectTarget =
                 Platform.OS === 'web' && typeof window !== 'undefined'
-                    ? `${window.location.origin}${window.location.pathname}`
+                    ? getWebOAuthReturnUrl()
                     : null;
             const authUrl = getGoogleLoginUrlForRedirect(redirectTarget);
             if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -200,22 +224,33 @@ const ProfileScreen = ({ route, navigation }) => {
     };
 
     const handleLogout = () => {
+        const runLogout = async () => {
+            try {
+                await clearLocalProfileState();
+                await clearPlan();
+                navigation.reset({
+                    index: 0,
+                    routes: [{ name: 'Splash' }],
+                });
+            } catch (error) {
+                console.warn('Logout failed:', error);
+            }
+        };
+
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            const confirmed = window.confirm('Do you want to sign out of this local profile session?');
+            if (confirmed) {
+                runLogout();
+            }
+            return;
+        }
+
         Alert.alert('Log out', 'Do you want to sign out of this local profile session?', [
             { text: 'Cancel', style: 'cancel' },
             {
                 text: 'Log Out',
                 style: 'destructive',
-                onPress: async () => {
-                    try {
-                        await clearLocalProfileState();
-                        navigation.reset({
-                            index: 0,
-                            routes: [{ name: 'Splash' }],
-                        });
-                    } catch (error) {
-                        console.warn('Logout failed:', error);
-                    }
-                },
+                onPress: runLogout,
             },
         ]);
     };

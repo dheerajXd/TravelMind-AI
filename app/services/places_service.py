@@ -136,6 +136,7 @@ class PlacesService:
             photo_reference = photos[0].get("photo_reference")
 
         return PlaceItem(
+            id=place.get("place_id"),
             name=place.get("name", "Unknown"),
             rating=place.get("rating"),
             address=place.get("vicinity") or place.get("formatted_address") or "Address unavailable",

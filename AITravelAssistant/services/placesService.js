@@ -18,6 +18,7 @@ const mapBackendPlace = (place, fallbackCategory = 'all') => ({
   lat: place.lat ?? null,
   lng: place.lng ?? null,
   types: Array.isArray(place.types) ? place.types : [],
+  businessStatus: place.business_status ?? null,
   openNow: place.open_now ?? null,
   photoUrl: resolvePhotoUrl(place.photo_url),
   normalizedCategory: fallbackCategory,

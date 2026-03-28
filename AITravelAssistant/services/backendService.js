@@ -195,6 +195,23 @@ export const getGoogleLoginUrl = () => {
   return `${getApiBaseUrl()}/auth/google/login`;
 };
 
+export const getWebOAuthReturnUrl = () => {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') {
+    return null;
+  }
+
+  const { protocol, hostname, port, origin } = window.location;
+  if (port) {
+    return origin;
+  }
+
+  if (hostname === '127.0.0.1' || hostname === 'localhost') {
+    return `${protocol}//localhost:8082`;
+  }
+
+  return origin;
+};
+
 export const getGoogleLoginUrlForRedirect = (redirectTo) => {
   if (!redirectTo) {
     return getGoogleLoginUrl();
@@ -268,12 +285,93 @@ export const getNotificationsEnabled = async () => {
   return stored === 'true';
 };
 
-export const setNotificationsEnabled = async (enabled) => {
-  await setStoredValue(NOTIFICATIONS_ENABLED_KEY, String(Boolean(enabled)));
+export const fetchNotificationSettings = async (userId) => {
+  try {
+    return await requestJson(`/notifications/settings/${encodeURIComponent(userId)}`);
+  } catch (error) {
+    console.warn('Notification settings fetch failed:', error);
+    return null;
+  }
+};
+
+export const updateNotificationSettings = async (
+  userId,
+  {
+    notificationsEnabled,
+    radiusKm = 2,
+    quietHoursStart = null,
+    quietHoursEnd = null,
+    maxPerDay = 3,
+  } = {}
+) => {
+  const payload = {
+    notifications_enabled: Boolean(notificationsEnabled),
+    radius_km: radiusKm,
+    quiet_hours_start: quietHoursStart,
+    quiet_hours_end: quietHoursEnd,
+    max_per_day: maxPerDay,
+  };
+  const response = await requestJson(`/notifications/settings/${encodeURIComponent(userId)}`, {
+    method: 'PUT',
+    body: payload,
+  });
+  await setStoredValue(NOTIFICATIONS_ENABLED_KEY, String(Boolean(response?.notifications_enabled)));
+  return response;
+};
+
+export const setNotificationsEnabled = async (enabled, options = {}) => {
+  const { userId, radiusKm, quietHoursStart, quietHoursEnd, maxPerDay } = options;
+  if (!userId) {
+    await setStoredValue(NOTIFICATIONS_ENABLED_KEY, String(Boolean(enabled)));
+    return { notifications_enabled: Boolean(enabled) };
+  }
+  return updateNotificationSettings(userId, {
+    notificationsEnabled: enabled,
+    radiusKm,
+    quietHoursStart,
+    quietHoursEnd,
+    maxPerDay,
+  });
+};
+
+export const triggerLocationUpdate = async ({ userId, lat, lng }) => {
+  return requestJson('/trigger/location-update', {
+    method: 'POST',
+    body: {
+      user_id: userId,
+      lat,
+      lng,
+    },
+  });
+};
+
+export const triggerManualNotifications = async (userId) => {
+  return requestJson('/trigger/manual', {
+    method: 'POST',
+    body: {
+      user_id: userId,
+    },
+  });
+};
+
+export const registerDeviceToken = async (userId, deviceToken) => {
+  if (!userId || !deviceToken) {
+    throw new Error('userId and deviceToken are required for token registration.');
+  }
+
+  return requestJson('/notifications/device-token', {
+    method: 'POST',
+    body: {
+      user_id: userId,
+      device_token: deviceToken,
+    },
+  });
 };
 
 export const clearLocalProfileState = async () => {
   await clearGoogleSessionId();
+  await clearPlannedItems().catch(() => null);
+  await setNotificationsEnabled(true).catch(() => null);
   if (Platform.OS === 'web') {
     window.localStorage.removeItem(USER_ID_KEY);
     return;

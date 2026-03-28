@@ -10,63 +10,78 @@ import {
 } from 'react-native';
 import TopInfoBar from '../components/TopInfoBar';
 import {
+    fetchCalendarEvents,
+    fetchGmailMessages,
     fetchNearbyHeroPlace,
     fetchUserContext,
+    getGoogleSessionId,
     getOrCreateUserId,
 } from '../services/backendService';
 import { useLiveContext } from '../context/LiveContext';
+import { usePlan } from '../context/PlanContext';
 
 const FILTERS = ['All', 'Active', 'Upcoming', 'Past'];
 
-const TripsScreen = ({ route }) => {
+const TripsScreen = ({ route, navigation }) => {
     const [loading, setLoading] = useState(true);
     const [activeFilter, setActiveFilter] = useState('All');
-    const [tripCard, setTripCard] = useState(null);
+    const [trips, setTrips] = useState([]);
+    const { plan: plannedItems } = usePlan();
 
     const onboardingParams = route?.params ?? {};
-    const { formattedTime, temperatureLabel, coordsLabel, locationLabel, latitude, longitude } = useLiveContext();
+    const { formattedTime, temperatureLabel, coordsLabel, locationLabel, latitude, longitude, shortLocation } = useLiveContext();
 
     useEffect(() => {
         if (latitude != null && longitude != null) {
             loadTrips();
         }
-    }, [latitude, longitude]);
+    }, [latitude, longitude, plannedItems]);
+
+    useEffect(() => {
+        const unsubscribe = navigation?.addListener?.('focus', loadTrips);
+        return unsubscribe;
+    }, [navigation, latitude, longitude, plannedItems]);
 
     const loadTrips = async () => {
+        if (latitude == null || longitude == null) return;
         setLoading(true);
         try {
             const userId = await getOrCreateUserId();
+            const sessionId = await getGoogleSessionId().catch(() => null);
 
-            const [context, heroPlace] = await Promise.all([
+            const [context, heroPlace, calendarData, gmailData] = await Promise.all([
                 fetchUserContext(userId).catch(() => null),
                 fetchNearbyHeroPlace(latitude, longitude).catch(() => null),
+                sessionId ? fetchCalendarEvents(sessionId).catch(() => null) : Promise.resolve(null),
+                sessionId ? fetchGmailMessages(sessionId, 5).catch(() => null) : Promise.resolve(null),
             ]);
 
-            const tripDetails = context?.trip_details || {};
-            const destination = tripDetails.destination || locationLabel || heroPlace?.name || 'Current trip';
-            const startDate = tripDetails.start_date ? new Date(tripDetails.start_date) : null;
-            const endDate = tripDetails.end_date ? new Date(tripDetails.end_date) : null;
-
-            setTripCard({
-                destination,
-                startDate,
-                endDate,
-                status: getTripStatus(startDate, endDate),
-                imageUrl: heroPlace?.photo_url || buildFallbackTripImage(destination),
-                note: tripDetails.notes || 'Your live travel context will appear here as your plans come together.',
+            const calendarEvents = sanitizeCalendarEvents(calendarData?.events || []);
+            const gmailMessages = gmailData?.messages || [];
+            const builtTrips = buildTrips({
+                context,
+                heroPlace,
+                plannedItems,
+                calendarEvents,
+                gmailMessages,
+                onboardingParams,
+                locationLabel,
+                shortLocation,
             });
+
+            setTrips(builtTrips);
         } catch (error) {
             console.warn('Trips screen failed:', error);
+            setTrips([]);
         } finally {
             setLoading(false);
         }
     };
 
     const visibleTrips = useMemo(() => {
-        if (!tripCard) return [];
-        if (activeFilter === 'All') return [tripCard];
-        return tripCard.status === activeFilter ? [tripCard] : [];
-    }, [activeFilter, tripCard]);
+        if (activeFilter === 'All') return trips;
+        return trips.filter((trip) => trip.status === activeFilter);
+    }, [activeFilter, trips]);
 
     if (loading) {
         return (
@@ -84,7 +99,7 @@ const TripsScreen = ({ route }) => {
                     <Text style={styles.title}>My Trips</Text>
                     <Text style={styles.subtitle}>Manage your travel plans</Text>
                 </View>
-                <Pressable style={styles.addButton}>
+                <Pressable style={styles.addButton} onPress={loadTrips}>
                     <Text style={styles.addButtonText}>＋</Text>
                 </Pressable>
             </View>
@@ -114,9 +129,9 @@ const TripsScreen = ({ route }) => {
             </View>
 
             {visibleTrips.map((trip) => (
-                <View key={trip.destination} style={styles.tripCard}>
+                <View key={trip.id} style={styles.tripCard}>
                     <ImageBackground source={{ uri: trip.imageUrl }} style={styles.tripImage} imageStyle={styles.tripImageInner}>
-                        <View style={styles.tripStatusBadge}>
+                        <View style={[styles.tripStatusBadge, trip.status === 'Past' && styles.tripStatusBadgePast, trip.status === 'Upcoming' && styles.tripStatusBadgeUpcoming]}>
                             <Text style={styles.tripStatusText}>{trip.status}</Text>
                         </View>
                     </ImageBackground>
@@ -126,7 +141,7 @@ const TripsScreen = ({ route }) => {
                                 <Text style={styles.tripDestination}>{trip.destination}</Text>
                                 <Text style={styles.tripDate}>{formatDateRange(trip.startDate, trip.endDate, onboardingParams)}</Text>
                             </View>
-                            <Text style={styles.tripPin}>⌖</Text>
+                            <Text style={styles.tripPin}>{trip.pinIcon}</Text>
                         </View>
                         <Text style={styles.tripNote}>{trip.note}</Text>
                     </View>
@@ -137,7 +152,7 @@ const TripsScreen = ({ route }) => {
                 <View style={styles.emptyCard}>
                     <Text style={styles.emptyTitle}>No trips in this filter yet</Text>
                     <Text style={styles.emptyText}>
-                        When trip dates and destinations are available in your live context, they will appear here.
+                        Connect Google Calendar or add planned places and this section will update automatically.
                     </Text>
                 </View>
             ) : null}
@@ -145,6 +160,152 @@ const TripsScreen = ({ route }) => {
             <View style={styles.footerSpace} />
         </ScrollView>
     );
+};
+
+const buildTrips = ({
+    context,
+    heroPlace,
+    plannedItems,
+    calendarEvents,
+    gmailMessages,
+    onboardingParams,
+    locationLabel,
+    shortLocation,
+}) => {
+    const trips = [];
+    const tripDetails = context?.context?.trip_details || context?.trip_details || {};
+    const destination = tripDetails.destination || locationLabel || heroPlace?.name || shortLocation || 'Current trip';
+    const startDate = tripDetails.start_date ? new Date(tripDetails.start_date) : inferActiveStart(calendarEvents);
+    const endDate = tripDetails.end_date ? new Date(tripDetails.end_date) : inferActiveEnd(calendarEvents);
+    const plannedSummary = plannedItems?.length
+        ? `You have ${plannedItems.length} planned stop${plannedItems.length > 1 ? 's' : ''} ready to use.`
+        : null;
+    const inboxSummary = gmailMessages?.[0]?.subject ? `Latest inbox signal: ${gmailMessages[0].subject}.` : null;
+
+    trips.push({
+        id: `context-${destination}`,
+        destination,
+        startDate,
+        endDate,
+        status: getTripStatus(startDate, endDate),
+        imageUrl: heroPlace?.photo_url || buildFallbackTripImage(destination),
+        note:
+            tripDetails.notes
+            || plannedSummary
+            || inboxSummary
+            || `Live travel context is active around ${shortLocation || destination}.`,
+        pinIcon: '⌖',
+    });
+
+    const eventTrips = calendarEvents
+        .map((event) => {
+            const eventStart = event.startDate;
+            const eventEnd = event.endDate || eventStart;
+            const summary = event.summary || 'Calendar plan';
+            const eventDestination = normalizeDestination(event.location || summary);
+            return {
+                id: `event-${event.id}`,
+                destination: eventDestination,
+                startDate: eventStart,
+                endDate: eventEnd,
+                status: getTripStatus(eventStart, eventEnd),
+                imageUrl: buildFallbackTripImage(eventDestination),
+                note: event.location
+                    ? `${summary} • ${event.location}`
+                    : `${summary} synced from your Google Calendar.`,
+                pinIcon: event.location ? '📍' : '🗓',
+            };
+        })
+        .filter((trip) => trip.destination && !isDuplicateTrip(trips, trip));
+
+    trips.push(...eventTrips);
+
+    const plannedTrips = (plannedItems || [])
+        .slice(0, 4)
+        .map((item) => ({
+            id: `planned-${item.id}`,
+            destination: item.name,
+            startDate: item.saved_at ? new Date(item.saved_at) : null,
+            endDate: null,
+            status: 'Upcoming',
+            imageUrl: item.imageUrl || buildFallbackTripImage(item.name),
+            note: item.metaText || item.description || 'Saved from your assistant plan.',
+            pinIcon: '✦',
+        }))
+        .filter((trip) => !isDuplicateTrip(trips, trip));
+
+    trips.push(...plannedTrips);
+
+    return sortTrips(trips);
+};
+
+const sanitizeCalendarEvents = (events) => {
+    const seen = new Set();
+    return (events || [])
+        .map((event) => {
+            const start = parseGoogleDate(event.start);
+            const end = parseGoogleDate(event.end);
+            return {
+                ...event,
+                startDate: start,
+                endDate: end,
+            };
+        })
+        .filter((event) => {
+            const summary = (event.summary || '').toLowerCase();
+            if (!event.startDate) return false;
+            if (summary.includes('birthday') || summary.includes('anniversary') || summary.includes('holiday')) {
+                return false;
+            }
+            const key = `${event.summary}-${event.location}-${event.startDate?.toISOString?.()}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+};
+
+const parseGoogleDate = (payload) => {
+    const value = payload?.dateTime || payload?.date;
+    if (!value) return null;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const inferActiveStart = (events) => {
+    const now = new Date();
+    const active = events.find((event) => event.startDate && event.endDate && event.startDate <= now && event.endDate >= now);
+    return active?.startDate || null;
+};
+
+const inferActiveEnd = (events) => {
+    const now = new Date();
+    const active = events.find((event) => event.startDate && event.endDate && event.startDate <= now && event.endDate >= now);
+    return active?.endDate || null;
+};
+
+const normalizeDestination = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    return raw.split(',').slice(0, 2).join(',').trim();
+};
+
+const isDuplicateTrip = (trips, candidate) => {
+    return trips.some((trip) => trip.destination === candidate.destination && trip.status === candidate.status);
+};
+
+const sortTrips = (trips) => {
+    const statusWeight = { Active: 0, Upcoming: 1, Past: 2 };
+    return [...trips].sort((a, b) => {
+        if (statusWeight[a.status] !== statusWeight[b.status]) {
+            return statusWeight[a.status] - statusWeight[b.status];
+        }
+        const aTime = a.startDate ? a.startDate.getTime() : 0;
+        const bTime = b.startDate ? b.startDate.getTime() : 0;
+        if (a.status === 'Past') {
+            return bTime - aTime;
+        }
+        return aTime - bTime;
+    });
 };
 
 const getTripStatus = (startDate, endDate) => {
@@ -290,6 +451,12 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         paddingVertical: 9,
     },
+    tripStatusBadgeUpcoming: {
+        backgroundColor: 'rgba(142, 111, 199, 0.86)',
+    },
+    tripStatusBadgePast: {
+        backgroundColor: 'rgba(125, 125, 145, 0.86)',
+    },
     tripStatusText: {
         color: '#FFFFFF',
         fontSize: 15,
@@ -350,7 +517,7 @@ const styles = StyleSheet.create({
         lineHeight: 22,
     },
     footerSpace: {
-        height: 24,
+        height: 26,
     },
 });
 

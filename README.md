@@ -46,11 +46,78 @@ For Google OAuth, Gmail, and Calendar you also need:
 ```env
 GOOGLE_OAUTH_CLIENT_ID=your_google_oauth_client_id
 GOOGLE_OAUTH_CLIENT_SECRET=your_google_oauth_client_secret
-GOOGLE_OAUTH_REDIRECT_URI=http://127.0.0.1:8000/auth/google/callback
+GOOGLE_OAUTH_REDIRECT_URI=http://127.0.0.1:8001/auth/google/callback
 ```
 
 OAuth sessions are persisted locally in `data/oauth_sessions.json`, so Gmail and Calendar sessions survive backend reloads and restarts.
 Travel context is persisted in `data/travel_assistant.db`.
+
+## OpenClaw Phase 1 Scaffold
+
+The project now includes an additive OpenClaw integration scaffold. This does not replace the current recommendation flow or backend decision logic. It only adds a configuration-aware preview surface for a future OpenClaw action/orchestration layer.
+
+Optional environment variables:
+
+```env
+OPENCLAW_ENABLED=false
+OPENCLAW_BASE_URL=
+OPENCLAW_API_KEY=
+OPENCLAW_WORKSPACE_ID=
+OPENCLAW_TIMEOUT_SECONDS=15
+```
+
+Available scaffold routes:
+
+```bash
+curl "http://127.0.0.1:8000/openclaw/status"
+```
+
+```bash
+curl -X POST http://127.0.0.1:8000/openclaw/context-preview \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "demo-user",
+    "location_label": "Tada, Andhra Pradesh",
+    "preferences": {
+      "budget": "medium",
+      "vibe": "calm"
+    },
+    "onboarding_profile": {
+      "cuisine_preference": "South Indian",
+      "free_time_preference": "food"
+    },
+    "weather": {
+      "temperature": 31,
+      "condition": "Mostly Clear"
+    },
+    "schedule": [
+      {
+        "time": "5:30 PM - 8:00 PM",
+        "title": "Free Time"
+      }
+    ],
+    "free_time_summary": "Free this evening near hotel."
+  }'
+```
+
+This returns the normalized payload that a later OpenClaw execution phase can use, without invoking or replacing the current recommendation pipeline.
+
+Phase 2 adds a user-aware preview route that can assemble the payload from existing stored context plus optional Google Calendar and Gmail data:
+
+```bash
+curl -X POST http://127.0.0.1:8000/openclaw/user-preview \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "demo-user",
+    "google_session_id": "your_google_session_id"
+  }'
+```
+
+This returns:
+
+- a normalized OpenClaw-ready payload
+- a lightweight assistant brief summary
+- context built from your existing storage and integrations only
 
 ## Example Requests
 
@@ -230,7 +297,7 @@ Open the returned `authorization_url`, sign in with Google, and Google will redi
 ### Exchange Google callback for a backend session
 
 ```bash
-curl "http://127.0.0.1:8000/auth/google/callback?code=GOOGLE_CODE&state=STATE_FROM_LOGIN"
+curl "http://127.0.0.1:8001/auth/google/callback?code=GOOGLE_CODE&state=STATE_FROM_LOGIN"
 ```
 
 This returns a `session_id` that you can use with Gmail and Calendar routes.

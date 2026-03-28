@@ -4,3 +4,5 @@ __pycache__/
 *.pyc
 data/oauth_sessions.json
 data/travel_assistant.db
+data/oauth_states.json
+data/recommendation_memory.json

@@ -16,14 +16,13 @@ import { useLiveContext } from '../context/LiveContext';
 import {
     fetchUserContext,
     getOrCreateUserId,
-    getPlannedItems,
-    togglePlannedItem,
 } from '../services/backendService';
 import {
     fetchNearbyPlaces,
     fetchPlaceSuggestions,
     searchPlaces,
 } from '../services/placesService';
+import { usePlan } from '../context/PlanContext';
 
 const CATEGORY_CONFIG = [
     { key: 'all', label: 'All', type: 'popular places' },
@@ -85,8 +84,8 @@ const ExploreScreen = () => {
     const [fallbackMessage, setFallbackMessage] = useState('');
     const [resultHeadline, setResultHeadline] = useState('Trending Near You');
     const [activeQuickAction, setActiveQuickAction] = useState(null);
-    const [plannedIds, setPlannedIds] = useState(new Set());
     const [userContext, setUserContext] = useState(null);
+    const { plan, addToPlan, isPlanned } = usePlan();
 
     useEffect(() => {
         const timeoutId = setTimeout(() => {
@@ -99,7 +98,6 @@ const ExploreScreen = () => {
         if (latitude != null && longitude != null) {
             loadExplore();
             loadUserContext();
-            loadPlannedIds();
         }
     }, [latitude, longitude]);
 
@@ -191,15 +189,6 @@ const ExploreScreen = () => {
             setUserContext(context?.context || null);
         } catch (error) {
             console.warn('Explore user context failed:', error);
-        }
-    };
-
-    const loadPlannedIds = async () => {
-        try {
-            const items = await getPlannedItems();
-            setPlannedIds(new Set(items.map((item) => item.id)));
-        } catch (error) {
-            console.warn('Explore planned items failed:', error);
         }
     };
 
@@ -434,7 +423,7 @@ const ExploreScreen = () => {
 
     const handleAddToPlan = async (item) => {
         try {
-            const result = await togglePlannedItem({
+            await addToPlan({
                 id: item.id,
                 name: item.name,
                 address: item.address || item.vicinity,
@@ -443,8 +432,7 @@ const ExploreScreen = () => {
                 rating: item.rating === 'N/A' ? null : item.rating,
                 imageUrl: item.photoUrl || null,
                 category: categoryLabelFor(item.normalizedCategory),
-            });
-            setPlannedIds(new Set(result.items.map((entry) => entry.id)));
+            }, { toast: true });
         } catch (error) {
             console.warn('Explore add to plan failed:', error);
         }
@@ -495,13 +483,21 @@ const ExploreScreen = () => {
         ]).slice(0, 8);
     }, [placesByCategory]);
 
+    const hasSearchContext = useMemo(() => {
+        return Boolean(debouncedQuery || selectedSearchOrigin?.name || activeQuickAction);
+    }, [activeQuickAction, debouncedQuery, selectedSearchOrigin]);
+
     const visibleItems = useMemo(() => {
         if (searchResults.length > 0) {
             return dedupePlaces(searchResults);
         }
 
-        if (activeQuickAction && fallbackResults.length > 0) {
+        if (hasSearchContext && fallbackResults.length > 0) {
             return dedupePlaces(fallbackResults);
+        }
+
+        if (hasSearchContext) {
+            return [];
         }
 
         if (activeCategory === 'all') {
@@ -517,9 +513,14 @@ const ExploreScreen = () => {
         }
 
         return dedupePlaces(placesByCategory[activeCategory] || []);
-    }, [activeCategory, activeQuickAction, fallbackResults, placesByCategory, searchResults]);
+    }, [activeCategory, fallbackResults, hasSearchContext, placesByCategory, searchResults]);
 
-    const noExactResults = searchResults.length === 0 && fallbackResults.length > 0 && Boolean(debouncedQuery || activeQuickAction);
+    const noExactResults = searchResults.length === 0
+        && fallbackResults.length > 0
+        && hasSearchContext;
+    const searchPending = searchLoading
+        || loadingSuggestions
+        || (Boolean(query.trim()) && query.trim() !== debouncedQuery);
 
     if (loading) {
         return (
@@ -698,31 +699,35 @@ const ExploreScreen = () => {
                     })}
                 </View>
 
-                <View style={styles.sectionHeadingRow}>
-                    <Text style={styles.sectionHeading}>Trending Near You</Text>
-                    <Text style={styles.sectionSupport}>Live picks with photos, ratings, and quick actions.</Text>
-                </View>
+                {!hasSearchContext ? (
+                    <>
+                        <View style={styles.sectionHeadingRow}>
+                            <Text style={styles.sectionHeading}>Trending Near You</Text>
+                            <Text style={styles.sectionSupport}>Live picks with photos, ratings, and quick actions.</Text>
+                        </View>
 
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.trendingRow}>
-                    {trendingCards.map((item) => (
-                        <Pressable
-                            key={`trending-${item.id}`}
-                            onPress={() => handleSuggestionSelect(item)}
-                            style={({ pressed }) => [styles.trendingCard, pressed && styles.interactiveCard]}
-                        >
-                            <View style={styles.trendingImageWrap}>
-                                <SuggestionCard
-                                    compact
-                                    name={item.name}
-                                    subtitle={categoryLabelFor(item.normalizedCategory)}
-                                    rating={item.rating === 'N/A' ? null : item.rating}
-                                    metaText={buildDistanceLabel(item, latitude, longitude)}
-                                    imageUrl={item.photoUrl}
-                                />
-                            </View>
-                        </Pressable>
-                    ))}
-                </ScrollView>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.trendingRow}>
+                            {trendingCards.map((item) => (
+                                <Pressable
+                                    key={`trending-${item.id}`}
+                                    onPress={() => handleSuggestionSelect(item)}
+                                    style={({ pressed }) => [styles.trendingCard, pressed && styles.interactiveCard]}
+                                >
+                                    <View style={styles.trendingImageWrap}>
+                                        <SuggestionCard
+                                            compact
+                                            name={item.name}
+                                            subtitle={categoryLabelFor(item.normalizedCategory)}
+                                            rating={item.rating === 'N/A' ? null : item.rating}
+                                            metaText={buildDistanceLabel(item, latitude, longitude)}
+                                            imageUrl={item.photoUrl}
+                                        />
+                                    </View>
+                                </Pressable>
+                            ))}
+                        </ScrollView>
+                    </>
+                ) : null}
 
                 <View style={styles.sectionHeadingRow}>
                     <Text style={styles.sectionHeading}>{resultHeadline}</Text>
@@ -737,15 +742,27 @@ const ExploreScreen = () => {
                     </Text>
                 </View>
 
-                {searchLoading ? (
+                {searchPending ? (
                     <View style={styles.resultsList}>
                         {[0, 1].map((item) => (
-                            <View key={`loading-${item}`} style={styles.resultSkeleton} />
+                            <View key={`loading-${item}`} style={styles.resultSkeleton}>
+                                <View style={styles.resultSkeletonImage} />
+                                <View style={styles.resultSkeletonBody}>
+                                    <View style={[styles.resultSkeletonLine, styles.resultSkeletonTitle]} />
+                                    <View style={[styles.resultSkeletonLine, styles.resultSkeletonMeta]} />
+                                    <View style={[styles.resultSkeletonLine, styles.resultSkeletonText]} />
+                                    <View style={[styles.resultSkeletonLine, styles.resultSkeletonTextShort]} />
+                                    <View style={styles.resultSkeletonActions}>
+                                        <View style={[styles.resultSkeletonButton, styles.resultSkeletonButtonPrimary]} />
+                                        <View style={[styles.resultSkeletonButton, styles.resultSkeletonButtonSecondary]} />
+                                    </View>
+                                </View>
+                            </View>
                         ))}
                     </View>
                 ) : null}
 
-                {!searchLoading && visibleItems.length > 0 ? (
+                {!searchPending && visibleItems.length > 0 ? (
                     <View style={styles.resultsList}>
                         {visibleItems.map((item) => (
                             <SuggestionCard
@@ -757,16 +774,18 @@ const ExploreScreen = () => {
                                 imageUrl={item.photoUrl}
                                 distanceLabel={buildDistanceLabel(item, latitude, longitude)}
                                 description={buildDescription(item)}
-                                primaryActionLabel={plannedIds.has(item.id) ? 'Added to Plan' : 'Add to Plan'}
+                                primaryActionLabel={isPlanned(item.id) ? 'Added ✓' : 'Add to Plan'}
                                 secondaryActionLabel="Map"
+                                tertiaryActionLabel={isPlanned(item.id) ? 'Saved' : 'Save'}
                                 onPrimaryAction={() => handleAddToPlan(item)}
                                 onSecondaryAction={() => handleOpenMap(item)}
+                                onTertiaryAction={() => handleAddToPlan(item)}
                             />
                         ))}
                     </View>
                 ) : null}
 
-                {!searchLoading && visibleItems.length === 0 ? (
+                {!searchPending && visibleItems.length === 0 ? (
                     <View style={styles.emptyWrap}>
                         <Text style={styles.emptyTitle}>No exact matches right now</Text>
                         <Text style={styles.emptyText}>
@@ -775,7 +794,7 @@ const ExploreScreen = () => {
                     </View>
                 ) : null}
 
-                {!searchLoading && fallbackResults.length > 0 && searchResults.length === 0 ? (
+                {!searchPending && fallbackResults.length > 0 && searchResults.length === 0 ? (
                     <View style={styles.popularWrap}>
                         <View style={styles.sectionHeadingRow}>
                             <Text style={styles.sectionHeading}>✨ Popular Nearby</Text>
@@ -795,10 +814,12 @@ const ExploreScreen = () => {
                                     imageUrl={item.photoUrl}
                                     distanceLabel={buildDistanceLabel(item, latitude, longitude)}
                                     description={buildDescription(item)}
-                                    primaryActionLabel={plannedIds.has(item.id) ? 'Added to Plan' : 'Add to Plan'}
+                                    primaryActionLabel={isPlanned(item.id) ? 'Added ✓' : 'Add to Plan'}
                                     secondaryActionLabel="Map"
+                                    tertiaryActionLabel={isPlanned(item.id) ? 'Saved' : 'Save'}
                                     onPrimaryAction={() => handleAddToPlan(item)}
                                     onSecondaryAction={() => handleOpenMap(item)}
+                                    onTertiaryAction={() => handleAddToPlan(item)}
                                 />
                             ))}
                         </View>
@@ -1099,7 +1120,7 @@ const styles = StyleSheet.create({
         gap: 16,
     },
     resultSkeleton: {
-        height: 320,
+        overflow: 'hidden',
         borderRadius: 20,
         backgroundColor: '#FFFFFF',
         shadowColor: '#000000',
@@ -1107,6 +1128,50 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.05,
         shadowRadius: 20,
         elevation: 3,
+    },
+    resultSkeletonImage: {
+        height: 180,
+        backgroundColor: '#EDEBF4',
+    },
+    resultSkeletonBody: {
+        padding: 16,
+    },
+    resultSkeletonLine: {
+        height: 16,
+        borderRadius: 999,
+        backgroundColor: '#E8E5EF',
+        marginBottom: 12,
+    },
+    resultSkeletonTitle: {
+        height: 24,
+        width: '62%',
+        backgroundColor: '#DFDBE9',
+    },
+    resultSkeletonMeta: {
+        width: '40%',
+    },
+    resultSkeletonText: {
+        width: '88%',
+    },
+    resultSkeletonTextShort: {
+        width: '56%',
+        marginBottom: 18,
+    },
+    resultSkeletonActions: {
+        flexDirection: 'row',
+        gap: 12,
+    },
+    resultSkeletonButton: {
+        height: 48,
+        borderRadius: 16,
+        backgroundColor: '#EEEAF7',
+    },
+    resultSkeletonButtonPrimary: {
+        flex: 1,
+        backgroundColor: '#E4DFF0',
+    },
+    resultSkeletonButtonSecondary: {
+        width: 112,
     },
     emptyWrap: {
         marginTop: 8,

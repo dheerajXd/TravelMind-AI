@@ -15,6 +15,7 @@ import {
   fetchGoogleProfile,
   getGoogleLoginUrlForRedirect,
   getGoogleSessionId,
+  getWebOAuthReturnUrl,
 } from '../services/backendService';
 
 const GoogleSignInScreen = ({ navigation }) => {
@@ -54,8 +55,22 @@ const GoogleSignInScreen = ({ navigation }) => {
 
     loadGoogleState();
     const unsubscribe = navigation.addListener('focus', loadGoogleState);
+    const oauthListener =
+      Platform.OS === 'web' && typeof window !== 'undefined'
+        ? () => {
+            loadGoogleState();
+          }
+        : null;
+
+    if (oauthListener) {
+      window.addEventListener('google-oauth-complete', oauthListener);
+    }
+
     return () => {
       active = false;
+      if (oauthListener) {
+        window.removeEventListener('google-oauth-complete', oauthListener);
+      }
       unsubscribe();
     };
   }, [navigation]);
@@ -82,7 +97,7 @@ const GoogleSignInScreen = ({ navigation }) => {
       setConnectedProfile(null);
       const redirectTarget =
         Platform.OS === 'web' && typeof window !== 'undefined'
-          ? `${window.location.origin}${window.location.pathname}`
+          ? getWebOAuthReturnUrl()
           : null;
       const authUrl = getGoogleLoginUrlForRedirect(redirectTarget);
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
