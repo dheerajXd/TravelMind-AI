@@ -1,51 +1,93 @@
-import axios from 'axios';
+import { getApiBaseUrl, requestJson } from './apiClient';
 
-// Get the API key from Expo environment variables
-const API_KEY = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
-const BASE_URL = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
+const resolvePhotoUrl = (photoUrl) => {
+  if (!photoUrl) return null;
+  if (photoUrl.startsWith('http://') || photoUrl.startsWith('https://')) {
+    return photoUrl;
+  }
+  return `${getApiBaseUrl()}${photoUrl}`;
+};
 
-/**
- * Fetch nearby places based on location and keyword.
- * @param {number} latitude 
- * @param {number} longitude 
- * @param {string} keyword e.g. "restaurant", "cafe", "workspace"
- */
+const mapBackendPlace = (place, fallbackCategory = 'all') => ({
+  id: place.id || `${place.name}-${place.address}`,
+  name: place.name,
+  rating: place.rating ?? 'N/A',
+  vicinity: place.address,
+  address: place.address,
+  location: place.lat != null && place.lng != null ? { lat: place.lat, lng: place.lng } : null,
+  lat: place.lat ?? null,
+  lng: place.lng ?? null,
+  types: Array.isArray(place.types) ? place.types : [],
+  businessStatus: place.business_status ?? null,
+  openNow: place.open_now ?? null,
+  photoUrl: resolvePhotoUrl(place.photo_url),
+  normalizedCategory: fallbackCategory,
+});
+
+export const searchPlaces = async ({
+  latitude,
+  longitude,
+  location,
+  type,
+  radius = 5000,
+}) => {
+  const params = {
+    type: type || 'popular places',
+    radius,
+  };
+
+  if (latitude != null && longitude != null) {
+    params.lat = latitude;
+    params.lng = longitude;
+  } else if (location) {
+    params.location = location;
+  } else {
+    throw new Error('MISSING_LOCATION');
+  }
+
+  const data = await requestJson('/places/search', { params });
+  const places = (data?.places || []).map((place) => mapBackendPlace(place, type));
+
+  console.log('Explore backend places response:', {
+    source: location ? 'global' : 'nearby',
+    type: params.type,
+    radius,
+    resultCount: places.length,
+    lat: params.lat,
+    lng: params.lng,
+    location: params.location,
+  });
+
+  return places;
+};
+
 export const fetchNearbyPlaces = async (latitude, longitude, keyword, radius = 5000) => {
-  if (!API_KEY || API_KEY === 'your_key_here') {
-    throw new Error('INVALID_KEY');
+  return searchPlaces({
+    latitude,
+    longitude,
+    type: keyword || 'popular places',
+    radius,
+  });
+};
+
+export const fetchPlaceSuggestions = async ({
+  query,
+  latitude,
+  longitude,
+  global = false,
+}) => {
+  const trimmedQuery = query?.trim();
+  if (!trimmedQuery || trimmedQuery.length < 2) {
+    return [];
   }
 
-  try {
-    const response = await axios.get(BASE_URL, {
-      params: {
-        location: `${latitude},${longitude}`,
-        radius: radius,
-        keyword: keyword,
-        key: API_KEY,
-      },
-    });
+  const results = await searchPlaces({
+    latitude: global ? undefined : latitude,
+    longitude: global ? undefined : longitude,
+    location: global ? trimmedQuery : undefined,
+    type: global ? 'popular places' : trimmedQuery,
+    radius: global ? 12000 : 5000,
+  });
 
-    if (response.data.status === 'REQUEST_DENIED') {
-      throw new Error('REQUEST_DENIED');
-    }
-
-    if (response.data.status !== 'OK' && response.data.status !== 'ZERO_RESULTS') {
-      throw new Error(response.data.status);
-    }
-
-    // Map the results to just what we need
-    return response.data.results.map((place) => ({
-      id: place.place_id,
-      name: place.name,
-      rating: place.rating || 'N/A',
-      vicinity: place.vicinity,
-      location: place.geometry.location,
-    }));
-  } catch (error) {
-    if (error.message === 'INVALID_KEY' || error.message === 'REQUEST_DENIED') {
-      throw error;
-    }
-    console.error('Error fetching places:', error);
-    throw new Error('NETWORK_ERROR');
-  }
+  return results.slice(0, 6);
 };
