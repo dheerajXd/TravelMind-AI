@@ -1,0 +1,46 @@
+require('dotenv').config();
+
+module.exports = {
+  appName: process.env.APP_NAME || 'AI Travel Assistant Backend',
+  appVersion: process.env.APP_VERSION || '1.0.0',
+  debug: process.env.DEBUG === 'true',
+  databaseUrl: process.env.DATABASE_URL || 'mongodb://localhost:27017/travel_assistant',
+  redisUrl: process.env.REDIS_URL || null,
+  fcmServiceAccountPath: process.env.FCM_SERVICE_ACCOUNT_PATH || null,
+  notificationScoreThreshold: parseFloat(process.env.NOTIFICATION_SCORE_THRESHOLD) || 0.6,
+  idleMinutesThreshold: parseInt(process.env.IDLE_MINUTES_THRESHOLD) || 10,
+
+  googlePlacesApiKey: process.env.GOOGLE_PLACES_API_KEY || null,
+  googleOauthClientId: process.env.GOOGLE_OAUTH_CLIENT_ID || null,
+  googleOauthClientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || null,
+  googleOauthRedirectUri: process.env.GOOGLE_OAUTH_REDIRECT_URI || null,
+  frontendWebUrl: process.env.FRONTEND_WEB_URL || 'http://localhost:8082',
+  openweatherApiKey: process.env.OPENWEATHER_API_KEY || null,
+  geminiApiKey: process.env.GEMINI_API_KEY || null,
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+  
+  openclawEnabled: process.env.OPENCLAW_ENABLED === 'true',
+  openclawBaseUrl: process.env.OPENCLAW_BASE_URL || null,
+  openclawApiKey: process.env.OPENCLAW_API_KEY || null,
+  openclawWorkspaceId: process.env.OPENCLAW_WORKSPACE_ID || null,
+  openclawGatewayToken: process.env.OPENCLAW_GATEWAY_TOKEN || null,
+  openclawAgentId: process.env.OPENCLAW_AGENT_ID || 'main',
+  openclawTimeoutSeconds: parseFloat(process.env.OPENCLAW_TIMEOUT_SECONDS) || 15.0,
+
+  googlePlacesBaseUrl: 'https://maps.googleapis.com/maps/api/place',
+  openweatherBaseUrl: 'https://api.open-meteo.com/v1',
+  openmeteoGeocodingBaseUrl: 'https://geocoding-api.open-meteo.com/v1',
+  geminiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/models',
+  googleOauthAuthorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+  googleOauthTokenUrl: 'https://oauth2.googleapis.com/token',
+  googleUserinfoUrl: 'https://openidconnect.googleapis.com/v1/userinfo',
+  gmailBaseUrl: 'https://gmail.googleapis.com/gmail/v1',
+  calendarBaseUrl: 'https://www.googleapis.com/calendar/v3',
+
+  requestTimeoutSeconds: 10.0,
+  geminiTimeoutSeconds: 30.0,
+  cacheTtlSeconds: 300,
+  contextTtlSeconds: 3600,
+  rateLimitRequests: parseInt(process.env.RATE_LIMIT_REQUESTS) || 60,
+  rateLimitWindowSeconds: parseInt(process.env.RATE_LIMIT_WINDOW_SECONDS) || 60,
+};

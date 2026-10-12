@@ -1,94 +1,67 @@
 # TravelMind AI
 
-**An AI-powered travel assistant for real-time, context-aware, and personalized recommendations.**
-
-## Overview
-
-TravelMind AI helps users make smarter travel decisions by combining live location, time of day, weather, schedule context, and personal preferences. It is designed to surface useful nearby suggestions, detect free-time opportunities, and keep travel planning adaptive and personalized.
+TravelMind AI is a context-aware, highly personalized travel assistant that intelligently suggests nearby places to eat, work, and explore. It combines real-time signals — like location, time, live weather, and your Google Calendar/Gmail context — to figure out exactly what you need at the present moment.
 
 ## Features
 
-### Context-Aware Recommendations
-- Personalized suggestions based on location, time, weather, and user preferences
-- Intelligent recommendation flow with explainable results
-- Real-time nearby discovery using Google Places
-
-### Smart Schedule Awareness
-- Free-time detection from synced calendar events
-- Contextual suggestions during idle or open time windows
-- Dashboard assistant for quick decision support
-
-### Personalized Experience
-- Onboarding-driven preference collection
-- Adaptive recommendation behavior based on saved context
-- Support for plan management across screens
-
-### Explore and Discovery
-- Nearby and global place search
-- Category-based discovery and filtering
-- Dynamic recommendation and suggestion views
-
-### Planning and Notifications
-- Add places to plan and keep them synced across screens
-- Backend notification system for context-aware triggers
-- Location and session-aware notification support
-
-### Live Travel Context
-- Real-time location integration
-- Weather-aware recommendation logic
-- Gmail and Google Calendar integration for richer travel context
-
-## Architecture
-
-```text
-[React Native (Expo) Frontend]
-        |
-        v
-[FastAPI Backend]
-        |
-        +--> Context Engine
-        +--> Recommendation Engine
-        +--> OpenClaw Assistant Layer
-        +--> Notification Service
-        |
-        +--> Google Places API
-        +--> Weather API
-        +--> Google Calendar / Gmail
-        |
-        v
-[SQLite / Extended Backend Persistence]
-```
+- **Context-Aware Recommendations**: Recommends the best spots (e.g., a quiet cafe, a quick bite, or a nearby attraction) based on weather, time, and your schedule.
+- **Smart Decision Engine**: Uses an advanced heuristic engine and Google's Gemini AI to rank places and provide human-readable reasoning for its suggestions.
+- **Proactive Triggers**: Sends intelligent push notifications (via Firebase Cloud Messaging) for top-rated spots when you are idle in a new area.
+- **Seamless Integrations**: Natively connects with Google Places, Open-Meteo for weather, and Google APIs (OAuth, Gmail, Calendar) to provide zero-effort personalization.
 
 ## Tech Stack
 
-### Frontend
-- React Native
-- Expo
+### Backend (Node.js / Express)
+- **Server**: Node.js, Express.js
+- **Database**: MongoDB (via Mongoose)
+- **Caching**: Redis (optional — falls back to in-memory store)
+- **APIs & AI**: Google Places, Open-Meteo, Gemini AI API
+- **Push Notifications**: Firebase Admin SDK
 
-### Backend
-- FastAPI
-- Python
+### Frontend (React Native / Expo)
+- **Framework**: React Native via Expo
+- **Navigation**: React Navigation (stack + bottom tabs)
+- **State**: React Context (LiveContext, PlanContext)
 
-### Integrations
-- Google Places API
-- Weather API
-- Google Calendar API
-- Gmail API
+## Project Structure
 
-### Supporting Systems
-- Context-aware recommendation engine
-- Shared state plan management
-- Notification backend services
+```
+TravelMind-AI/
+├── server/                   # Express.js backend
+│   ├── config/               # Environment variables and config management
+│   ├── middleware/            # Error handling and request middleware
+│   ├── models/               # Mongoose schemas (User, Place, Notification, etc.)
+│   ├── routes/               # Express route handlers for all endpoints
+│   ├── services/             # Core business logic (weather, context, Gemini, decision engine)
+│   ├── utils/                # Helper functions
+│   └── server.js             # App entry point
+└── AITravelAssistant/        # React Native / Expo mobile app
+    ├── components/
+    ├── context/
+    ├── navigation/
+    ├── screens/
+    └── services/
+```
 
-## Setup Instructions
+## Setup & Execution
+
+### Prerequisites
+
+1. **Node.js** (v18+)
+2. **MongoDB** — local (`mongodb://localhost:27017`) or a MongoDB Atlas URI
+3. **Redis** (optional) — local on port 6379, or set `REDIS_URL`. Falls back to in-memory cache if unavailable.
+4. API keys (see `server/.env.example`)
 
 ### Backend
 
 ```bash
-cd app
-pip install -r ../requirements.txt
-uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
+cd server
+npm install
+cp .env.example .env   # fill in your API keys
+npm start              # or: npm run dev (requires nodemon)
 ```
+
+The API will be available at `http://localhost:8000`.
 
 ### Frontend
 
@@ -98,32 +71,21 @@ npm install
 npx expo start -c
 ```
 
-### Environment
+Make sure `EXPO_PUBLIC_API_BASE_URL` in `AITravelAssistant/.env` points to your running backend (default: `http://127.0.0.1:8000`).
 
-Create the required `.env` files for backend and frontend with your API keys and local configuration, including:
-- Google Places API key
-- Weather API key
-- Google OAuth credentials
-- Frontend API base URL
+## Environment Variables
 
-## Demo Flow
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | ✅ | MongoDB connection string |
+| `GOOGLE_PLACES_API_KEY` | ✅ | Google Places API key |
+| `GOOGLE_OAUTH_CLIENT_ID` | ✅ | Google OAuth client ID |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | ✅ | Google OAuth client secret |
+| `GEMINI_API_KEY` | ✅ | Gemini AI API key |
+| `REDIS_URL` | ❌ | Redis URL (falls back to in-memory) |
+| `FCM_SERVICE_ACCOUNT_PATH` | ❌ | Path to Firebase service account JSON |
 
-1. Launch the app and complete onboarding preferences.
-2. Allow location access to enable real-time local recommendations.
-3. Connect Google Calendar/Gmail to enrich schedule and travel context.
-4. Explore nearby or global places through the Explore screen.
-5. Add places to your plan and see updates reflected across the app.
-6. Use the Dashboard assistant to review free-time suggestions and context-aware recommendations.
-7. Trigger backend notifications when location and session context support a strong recommendation.
-
-## Future Improvements
-
-- Persistent structured user profile and learning history
-- Stronger adaptive ranking based on interaction feedback
-- Native push notification delivery testing and rollout
-- More robust trip timeline generation and trip history views
-- Enhanced assistant reasoning and multi-option comparisons
-- Production deployment configuration and monitoring
+See [`server/.env.example`](server/.env.example) for the full list.
 
 ## Contributors
 

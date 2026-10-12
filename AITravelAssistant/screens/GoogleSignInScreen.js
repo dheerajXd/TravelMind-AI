@@ -108,7 +108,7 @@ const GoogleSignInScreen = ({ navigation }) => {
     } catch (error) {
       console.warn('Google sign-in launch failed:', error);
       const detail = error?.message?.includes('Failed to fetch') || error?.message?.includes('Network')
-        ? 'The backend is not reachable right now. Start the FastAPI server first, then try again.'
+        ? 'The backend is not reachable right now. Start the Express server first, then try again.'
         : 'Could not open the Google sign-in flow right now.';
       Alert.alert('Google sign-in', detail);
       setOpeningGoogle(false);
