@@ -87,13 +87,6 @@ Make sure `EXPO_PUBLIC_API_BASE_URL` in `AITravelAssistant/.env` points to your 
 
 See [`server/.env.example`](server/.env.example) for the full list.
 
-## Contributors
-
-- Dheeraj D
-- Mohan Sashank
-- Eswar Vardhan
-- Lalith Madhav
-
 ## License
 
 This project is licensed under the MIT License.
